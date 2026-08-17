@@ -1,8 +1,13 @@
-"""End-to-end tests against a REAL, running inference engine.
+"""End-to-end tests for the OLLAMA engine, against a REAL running daemon.
+
+These exercise the third-party-weights path: streaming, tool calling and the
+thinking scale against whatever capable model the machine has installed. They
+deliberately do NOT use Swift - Swift is Minerva's own trained base model and
+runs on the native engine, covered by ``test_trained_swift.py``.
 
 Nothing in this file is simulated. Every assertion here is about what an actual
 Ollama daemon running actual weights does with Minerva's payloads. If no daemon
-is reachable, or Swift's weights are not installed, these tests skip with an
+is reachable, or the required weights are not installed, these tests skip with an
 explanation - they are never satisfied by a stub.
 
 To run them::
@@ -53,29 +58,29 @@ class TestEngineIsReal:
                 engine.list_available_models()
 
 
-class TestSwiftGenerates:
-    def test_it_answers_a_question(self, swift: MinervaModel) -> None:
-        answer = swift.ask("Reply with exactly one word: the capital city of France.")
+class TestOllamaGenerates:
+    def test_it_answers_a_question(self, ollama_model: MinervaModel) -> None:
+        answer = ollama_model.ask("Reply with exactly one word: the capital city of France.")
         assert answer.strip(), "the model returned nothing at all"
         assert "paris" in answer.lower()
 
-    def test_it_reports_real_token_usage(self, swift: MinervaModel) -> None:
-        result = swift.chat([user("Say hi.")], thinking="do")
+    def test_it_reports_real_token_usage(self, ollama_model: MinervaModel) -> None:
+        result = ollama_model.chat([user("Say hi.")], thinking="do")
         assert result.usage.prompt_tokens and result.usage.prompt_tokens > 0
         assert result.usage.completion_tokens and result.usage.completion_tokens > 0
         assert result.duration_seconds and result.duration_seconds > 0
 
-    def test_the_system_prompt_reaches_the_model(self, swift: MinervaModel) -> None:
-        answer = swift.ask(
+    def test_the_system_prompt_reaches_the_model(self, ollama_model: MinervaModel) -> None:
+        answer = ollama_model.ask(
             "What is your name?",
             system_prompt="You are called Minerva Swift. Answer with your name only.",
             thinking="do",
         )
         assert "swift" in answer.lower()
 
-    def test_sampling_parameters_are_honoured(self, swift: MinervaModel) -> None:
+    def test_sampling_parameters_are_honoured(self, ollama_model: MinervaModel) -> None:
         # A tiny num_predict must visibly truncate the output.
-        short = swift.chat(
+        short = ollama_model.chat(
             [user("Count slowly from one to fifty in words.")],
             thinking="do",
             sampling=SamplingParams(max_tokens=8),
@@ -86,9 +91,9 @@ class TestSwiftGenerates:
     def test_a_missing_model_fails_with_an_actionable_message(
         self, live_engine: Engine
     ) -> None:
-        from minerva.models.swift import SWIFT
+        from conftest import CAPABLE_SPEC
 
-        ghost = SWIFT.with_overrides(
+        ghost = CAPABLE_SPEC.with_overrides(
             name="ghost", engine_model="not-a-real-model:999b", engine_model_fallbacks=()
         )
         model = MinervaModel(ghost, live_engine)
@@ -97,13 +102,13 @@ class TestSwiftGenerates:
 
 
 class TestThinkingOnRealHardware:
-    def test_do_produces_no_reasoning_trace(self, swift: MinervaModel) -> None:
-        result = swift.chat([user("What is 2 + 2?")], thinking="do")
+    def test_do_produces_no_reasoning_trace(self, ollama_model: MinervaModel) -> None:
+        result = ollama_model.chat([user("What is 2 + 2?")], thinking="do")
         assert not result.thinking, "DO must switch the reasoning phase off entirely"
         assert result.content.strip()
 
-    def test_higher_notes_produce_a_reasoning_trace(self, swift: MinervaModel) -> None:
-        result = swift.chat(
+    def test_higher_notes_produce_a_reasoning_trace(self, ollama_model: MinervaModel) -> None:
+        result = ollama_model.chat(
             [user("A shop sells pens at 7 for 21 shekels. What do 12 pens cost?")],
             thinking="sol",
         )
@@ -111,34 +116,34 @@ class TestThinkingOnRealHardware:
         assert result.content.strip()
 
     def test_thinking_is_returned_separately_from_the_answer(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
-        result = swift.chat([user("Is 91 a prime number? Answer yes or no.")], thinking="mi")
+        result = ollama_model.chat([user("Is 91 a prime number? Answer yes or no.")], thinking="mi")
         if result.thinking:
             assert result.thinking not in result.content
 
     @pytest.mark.parametrize("note", ["do", "re", "mi", "fa", "sol"])
-    def test_every_note_swift_supports_actually_runs(
-        self, swift: MinervaModel, note: str
+    def test_every_note_the_model_supports_actually_runs(
+        self, ollama_model: MinervaModel, note: str
     ) -> None:
-        result = swift.chat([user("Say the word: ready.")], thinking=note)
+        result = ollama_model.chat([user("Say the word: ready.")], thinking=note)
         assert result.content.strip()
 
-    def test_hebrew_note_names_work_end_to_end(self, swift: MinervaModel) -> None:
-        assert swift.ask("Say the word: ready.", thinking="סול").strip()
+    def test_hebrew_note_names_work_end_to_end(self, ollama_model: MinervaModel) -> None:
+        assert ollama_model.ask("Say the word: ready.", thinking="סול").strip()
 
     def test_a_note_above_the_ceiling_is_clamped_and_still_answers(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
         # Swift tops out at SOL; asking for SI must not fail.
-        assert swift.ask("Say the word: ready.", thinking="si").strip()
+        assert ollama_model.ask("Say the word: ready.", thinking="si").strip()
 
 
 class TestStreaming:
     def test_chunks_arrive_and_assemble_into_the_final_answer(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
-        chunks = list(swift.stream([user("Count from 1 to 5.")], thinking="do"))
+        chunks = list(ollama_model.stream([user("Count from 1 to 5.")], thinking="do"))
 
         assert chunks, "the stream produced nothing"
         assert chunks[-1].kind == "done"
@@ -147,9 +152,9 @@ class TestStreaming:
         streamed = "".join(chunk.text for chunk in chunks if chunk.kind == "content")
         assert streamed == chunks[-1].result.message.content
 
-    def test_reasoning_streams_on_its_own_channel(self, swift: MinervaModel) -> None:
+    def test_reasoning_streams_on_its_own_channel(self, ollama_model: MinervaModel) -> None:
         chunks = list(
-            swift.stream([user("What is 13 * 17? Think it through.")], thinking="sol")
+            ollama_model.stream([user("What is 13 * 17? Think it through.")], thinking="sol")
         )
         thinking_chunks = [c for c in chunks if c.kind == "thinking"]
         if thinking_chunks:
@@ -160,11 +165,11 @@ class TestStreaming:
 
 class TestToolCallingForReal:
     def test_the_model_calls_the_calculator_and_uses_its_answer(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
         calls: list[str] = []
         agent = Agent(
-            swift,
+            ollama_model,
             thinking="fa",
             on_tool_call=lambda call: calls.append(call.name),
         )
@@ -176,9 +181,9 @@ class TestToolCallingForReal:
         assert "1427203" in run.answer.replace(",", "").replace(" ", "")
 
     def test_a_tool_result_really_flows_back_into_the_transcript(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
-        agent = Agent(swift, thinking="fa")
+        agent = Agent(ollama_model, thinking="fa")
         run = agent.run("Use the calculate tool to compute 111 * 111 and report the result.")
 
         tool_messages = [m for m in run.messages if m.role is Role.TOOL]
@@ -186,7 +191,7 @@ class TestToolCallingForReal:
         assert any("12321" in m.content for m in tool_messages)
 
     def test_a_custom_tool_is_invoked_with_real_arguments(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
         received: list[str] = []
 
@@ -200,33 +205,33 @@ class TestToolCallingForReal:
             received.append(surname)
             return f"EMP-{surname.upper()}-4417"
 
-        agent = Agent(swift, tools=ToolRegistry([lookup_employee_id]), thinking="fa")
+        agent = Agent(ollama_model, tools=ToolRegistry([lookup_employee_id]), thinking="fa")
         run = agent.run("Look up the employee ID for the surname Cohen and tell me what it is.")
 
         assert received == ["Cohen"] or [s.lower() for s in received] == ["cohen"]
         assert "4417" in run.answer
 
     def test_a_failing_tool_is_recovered_from_rather_than_crashing(
-        self, swift: MinervaModel
+        self, ollama_model: MinervaModel
     ) -> None:
         @tool
         def unstable_sensor() -> str:
             """Read the temperature sensor."""
             raise RuntimeError("sensor offline")
 
-        agent = Agent(swift, tools=ToolRegistry([unstable_sensor]), thinking="fa")
+        agent = Agent(ollama_model, tools=ToolRegistry([unstable_sensor]), thinking="fa")
         run = agent.run("Read the temperature sensor and tell me what happened.")
 
         assert run.answer.strip(), "the run must still produce an answer"
         assert any(m.role is Role.TOOL and m.is_error for m in run.messages)
 
-    def test_no_tool_is_called_when_none_is_needed(self, swift: MinervaModel) -> None:
-        agent = Agent(swift, thinking="do")
+    def test_no_tool_is_called_when_none_is_needed(self, ollama_model: MinervaModel) -> None:
+        agent = Agent(ollama_model, thinking="do")
         run = agent.run("Reply with exactly one word: hello.")
         assert run.tool_calls == []
 
-    def test_the_run_records_what_happened(self, swift: MinervaModel) -> None:
-        agent = Agent(swift, thinking="fa")
+    def test_the_run_records_what_happened(self, ollama_model: MinervaModel) -> None:
+        agent = Agent(ollama_model, thinking="fa")
         run = agent.run("Use the calculate tool for 25 * 25, then state the answer.")
 
         assert run.steps, "a run must record at least one model turn"
@@ -236,21 +241,21 @@ class TestToolCallingForReal:
 
 
 class TestSessionMemory:
-    def test_the_model_remembers_across_turns(self, swift: MinervaModel) -> None:
-        session = Session(swift, thinking="do")
+    def test_the_model_remembers_across_turns(self, ollama_model: MinervaModel) -> None:
+        session = Session(ollama_model, thinking="do")
         session.send("My name is Dana. Remember it.")
         answer = session.send("What is my name? Reply with the name only.")
         assert "dana" in answer.lower()
 
-    def test_the_transcript_grows_with_both_sides(self, swift: MinervaModel) -> None:
-        session = Session(swift, thinking="do")
+    def test_the_transcript_grows_with_both_sides(self, ollama_model: MinervaModel) -> None:
+        session = Session(ollama_model, thinking="do")
         before = len(session)
         session.send("Say hi.")
         assert len(session) > before
         assert any(m.role is Role.ASSISTANT for m in session)
 
-    def test_reset_really_forgets(self, swift: MinervaModel) -> None:
-        session = Session(swift, thinking="do")
+    def test_reset_really_forgets(self, ollama_model: MinervaModel) -> None:
+        session = Session(ollama_model, thinking="do")
         session.send("My name is Dana.")
         session.reset()
         answer = session.send(
@@ -259,12 +264,14 @@ class TestSessionMemory:
         assert "dana" not in answer.lower()
 
     def test_extended_thinking_keeps_the_trace_in_the_transcript(
-        self, live_engine: Engine, swift: MinervaModel
+        self, live_engine: Engine, ollama_model: MinervaModel
     ) -> None:
-        # Swift's ceiling is SOL, so raise it for this test to exercise the
+        # The spec's ceiling is SOL, so raise it for this test to exercise the
         # Extended Thinking path on real hardware.
-        deep_spec = swift.spec.with_overrides(name="swift-deep", max_thinking=ThinkingLevel.SI)
-        deep = MinervaModel(deep_spec, live_engine, tools=swift.tools)
+        deep_spec = ollama_model.spec.with_overrides(
+            name="deep-integration", max_thinking=ThinkingLevel.SI
+        )
+        deep = MinervaModel(deep_spec, live_engine, tools=ollama_model.tools)
         session = Session(deep, thinking="la")
 
         session.send("What is 19 * 21? Think it through.")
@@ -278,7 +285,7 @@ class TestPayloadsAreAccepted:
     """The daemon must accept every payload shape Minerva can produce."""
 
     def test_a_transcript_with_tool_calls_and_results_round_trips(
-        self, live_engine: Engine, swift: MinervaModel
+        self, live_engine: Engine, ollama_model: MinervaModel
     ) -> None:
         from minerva.messages import ToolCall, ToolResult
 
@@ -289,9 +296,9 @@ class TestPayloadsAreAccepted:
             ToolResult(call_id="call_1", name="calculate", content="731").to_message(),
         ]
         request = GenerationRequest(
-            model=swift.resolve_engine_model(),
-            messages=swift._with_system_prompt(messages, None),
-            tools=list(swift.tools.specs()) if swift.tools else [],
+            model=ollama_model.resolve_engine_model(),
+            messages=ollama_model._with_system_prompt(messages, None),
+            tools=list(ollama_model.tools.specs()) if ollama_model.tools else [],
             thinking=ThinkingLevel.DO.profile,
         )
         result = live_engine.chat(request)

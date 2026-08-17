@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -98,15 +99,51 @@ def live_engine(config: MinervaConfig) -> Iterator[Engine]:
     engine.close()
 
 
+# Ollama tags that support both tool calling and a reasoning phase, most
+# preferred first. The integration suite needs a model with those capabilities;
+# which one is installed varies by machine.
+_PREFERRED_OLLAMA_TAGS = ("qwen3:1.7b", "qwen3:0.6b", "qwen3:4b", "qwen3:8b")
+
+
 @pytest.fixture(scope="session")
-def swift(live_engine: Engine) -> MinervaModel:
-    """Swift, bound to the live engine - or a skip if its weights are missing."""
+def ollama_model(live_engine: Engine) -> MinervaModel:
+    """A tool- and thinking-capable model on the live Ollama daemon.
+
+    Note this is deliberately *not* Swift. Swift is Minerva's own trained base
+    model and runs on the native engine; these tests exercise the Ollama engine
+    against whatever capable third-party weights the machine happens to have.
+    """
+    installed = live_engine.list_available_models()
+    tag = next((t for t in _PREFERRED_OLLAMA_TAGS if t in installed), None)
+    if tag is None:
+        pytest.skip(
+            f"none of {_PREFERRED_OLLAMA_TAGS} is installed on {live_engine.name} "
+            f"(found: {installed or 'nothing'}); run `ollama pull qwen3:1.7b`"
+        )
+    spec = CAPABLE_SPEC.with_overrides(
+        name="ollama-integration", engine_model=tag, engine_model_fallbacks=()
+    )
+    return MinervaModel(spec, live_engine, tools=default_registry())
+
+
+@pytest.fixture(scope="session")
+def trained_swift() -> MinervaModel:
+    """Swift, loaded from a real checkpoint - or a skip if it has not been trained."""
+    pytest.importorskip("torch", reason="needs the 'training' extra")
+    from minerva.engines.native import NativeEngine
+
+    checkpoint_dir = Path(os.environ.get("MINERVA_CHECKPOINT_DIR", "checkpoints"))
+    engine = NativeEngine(checkpoint_dir=checkpoint_dir, device="cpu")
+    health = engine.health()
+    if not health.available:
+        pytest.skip(f"no trained Swift: {health}. Run `minerva prepare-data && minerva train`.")
+
     spec = get_spec("swift")
-    model = MinervaModel(spec, live_engine, tools=default_registry())
+    model = MinervaModel(spec, engine)
     if not model.is_installed():
         pytest.skip(
-            f"none of {spec.candidate_engine_models()} is installed on "
-            f"{live_engine.name}; run `minerva pull swift`"
+            f"no checkpoint for {spec.name!r} under {checkpoint_dir} "
+            f"(found: {engine.list_available_models()})"
         )
     return model
 
