@@ -5,7 +5,13 @@ specification. Keeping them apart is what lets one Minerva model run through
 Ollama on a laptop today and through a served backend tomorrow without touching
 the model definition, the tools or the agent loop.
 
-The reference implementation is `src/minerva/engines/ollama.py`.
+There are two reference implementations, and they sit at opposite ends of the
+contract - read whichever is closer to what you are building:
+
+* `src/minerva/engines/native.py` - **in-process**. Loads a Minerva checkpoint
+  and runs it with PyTorch. No network, no daemon, lazy torch import.
+* `src/minerva/engines/ollama.py` - **over HTTP**. Talks to a local daemon,
+  with streaming NDJSON, tool schemas on the wire and health probes.
 
 ---
 
@@ -66,6 +72,11 @@ picks whichever it understands:
 | `enabled` | an on/off switch | ✅ `think: false` for DO |
 | `effort` | `"low"`/`"medium"`/`"high"` | ✅ `think: "medium"` |
 | `budget_tokens` | a numeric reasoning budget | ❌ ignored |
+
+If the models your engine serves cannot reason at all, say so —
+`NativeEngine` sets `thinking=False` and every level then resolves to `DO`.
+That is the honest reporting `CLAUDE.md` requires: never accept a thinking
+request you cannot honour and quietly return an ordinary answer.
 
 ```python
 def _encode_thinking(profile):
@@ -131,6 +142,12 @@ reachable.
 **Do not write a mock engine.** A test that passes against a simulated backend
 proves nothing about the backend, and a green suite that proved nothing is
 worse than a skipped one. See `tests/conftest.py`.
+
+For an in-process engine there is a third, better option, which
+`tests/test_engine_native.py` uses: **train a real, tiny model in the test
+fixture**. Fifteen optimisation steps on a 64-dimension model takes under a
+second and gives you genuinely trained weights on disk to load and generate
+from - no simulation anywhere.
 
 ---
 
