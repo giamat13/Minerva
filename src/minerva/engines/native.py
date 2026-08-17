@@ -276,8 +276,13 @@ class NativeEngine(Engine):
         ):
             token_id = int(token.item())
             pieces.append(token_id)
-            pending.append(token_id)
 
+            # The document separator is a control token telling us to stop.
+            # Decoding it would print a literal "<|endoftext|>" to the user.
+            if token_id == tokenizer.eot_id:
+                continue
+
+            pending.append(token_id)
             text = tokenizer.decode(pending)
             if "�" in text:
                 continue  # incomplete UTF-8; wait for the next token
@@ -287,7 +292,7 @@ class NativeEngine(Engine):
         if pending:
             yield StreamChunk(kind="content", text=tokenizer.decode(pending))
 
-        completion = tokenizer.decode(pieces)
+        completion = tokenizer.decode([t for t in pieces if t != tokenizer.eot_id])
         message = Message(role=Role.ASSISTANT, content=completion)
         result = GenerationResult(
             message=message,

@@ -187,6 +187,55 @@ class TestGeneration:
         with pytest.raises(Exception, match="leaves no room"):
             engine.chat(request)
 
+    def test_the_end_of_text_token_never_reaches_the_user(
+        self, engine: NativeEngine
+    ) -> None:
+        """<|endoftext|> is a control token, not text.
+
+        Regression: it was decoded and printed literally at the end of any
+        generation that terminated properly.
+
+        To make the model really emit it, the stop token's output row is
+        pointed along the actual final hidden state, so its logit is genuinely
+        the largest. Simply adding a constant does not work: with tied
+        embeddings the resulting logit is `k * sum(h)`, which is hugely
+        *negative* whenever the hidden state happens to sum negative.
+        """
+        import torch
+
+        from minerva.training.tokenizer import END_OF_TEXT
+
+        model, tokenizer = engine.load("tiny")
+        prompt_ids = tokenizer.encode("It is")
+        prompt = torch.tensor([prompt_ids], dtype=torch.long)
+
+        # Capture the hidden state the output layer will actually see.
+        captured: dict[str, torch.Tensor] = {}
+        handle = model.norm.register_forward_hook(
+            lambda _m, _i, output: captured.__setitem__("h", output.detach())
+        )
+        with torch.no_grad():
+            model(prompt)
+        handle.remove()
+
+        hidden = captured["h"][0, -1]
+        with torch.no_grad():
+            model.lm_head.weight[tokenizer.eot_id] = hidden / hidden.norm() * 1_000.0
+
+        chunks = list(engine.stream(self._request("It is", temperature=0.0)))
+        final = chunks[-1].result
+        assert final is not None
+        assert final.finish_reason == "stop", "the stop token should have fired"
+
+        # It is counted, because it was really generated...
+        assert final.usage.completion_tokens == 1
+        # ...but it is never shown.
+        assert END_OF_TEXT not in final.content
+        assert final.content == ""
+        for chunk in chunks:
+            if chunk.kind == "content":
+                assert END_OF_TEXT not in chunk.text
+
     def test_an_over_long_prompt_is_truncated_not_crashed(
         self, engine: NativeEngine
     ) -> None:
