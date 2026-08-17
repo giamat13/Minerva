@@ -33,6 +33,16 @@ __all__ = [
 EngineFactory = Callable[..., Engine]
 
 
+def _build_native(config: MinervaConfig, **overrides: Any) -> Engine:
+    from .native import NativeEngine
+
+    return NativeEngine(
+        checkpoint_dir=overrides.pop("checkpoint_dir", config.checkpoint_dir),
+        threads=overrides.pop("threads", config.torch_threads),
+        **overrides,
+    )
+
+
 def _build_ollama(config: MinervaConfig, **overrides: Any) -> Engine:
     from .ollama import OllamaEngine
 
@@ -47,6 +57,9 @@ def _build_ollama(config: MinervaConfig, **overrides: Any) -> Engine:
 # Add new engines here. Keep the key short and lowercase - it is what users
 # type in config files, env vars and on the CLI.
 _FACTORIES: dict[str, EngineFactory] = {
+    # Minerva's own engine, running Minerva's own trained weights.
+    "minerva": _build_native,
+    # Third-party weights served by a local Ollama daemon.
     "ollama": _build_ollama,
 }
 

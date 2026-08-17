@@ -33,11 +33,40 @@ from collections.abc import Iterator
 import pytest
 
 from minerva.config import MinervaConfig
-from minerva.engines.base import Engine
+from minerva.engines.base import Engine, SamplingParams
 from minerva.engines.ollama import OllamaEngine
-from minerva.models.base import MinervaModel
+from minerva.models.base import MinervaModel, ModelSpec
 from minerva.models.registry import get_spec
+from minerva.thinking import ThinkingLevel
 from minerva.tools.registry import ToolRegistry, default_registry
+
+# A spec for a hypothetical Minerva model that *does* support tools, thinking
+# and a system prompt.
+#
+# Platform behaviour - system-prompt handling, tool attachment, thinking
+# resolution - is the same for every model, so testing it against Swift would
+# couple those tests to whatever Swift happens to be today. Swift is currently
+# a base model with none of these capabilities, which is a fact about its
+# training, not about the platform. Tests that are really about `MinervaModel`
+# use this spec; tests that are about Swift use `SWIFT`.
+CAPABLE_SPEC = ModelSpec(
+    name="capable-test-model",
+    display_name="Capable Test Model",
+    version="1.0.0",
+    description="A hypothetical tool- and thinking-capable Minerva model, for tests.",
+    tier="medium",
+    engine="ollama",
+    engine_model="test-model:1b",
+    engine_model_fallbacks=("test-model:0.5b",),
+    system_prompt="You are a capable test model.",
+    sampling=SamplingParams(temperature=0.7, top_p=0.8),
+    default_thinking=ThinkingLevel.FA,
+    max_thinking=ThinkingLevel.SOL,
+    supports_tools=True,
+    supports_thinking=True,
+    context_length=8192,
+    parameter_count="1B",
+)
 
 
 def _host() -> str:

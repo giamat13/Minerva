@@ -50,6 +50,25 @@ The same standard applies to **evaluation** sets, and applies double: an eval
 built from generated permutations measures nothing except whether the model
 learned the template.
 
+### How this project already applies the rule
+
+`src/minerva/training/data.py` is the worked example, and new corpora must meet
+the same bar:
+
+* Every source carries its **origin and licence** in code, and the build writes
+  a `manifest.json` with per-source counts, character totals and SHA-256 hashes.
+* The corpus is **not vendored** — it is downloaded from the original
+  distributor, so provenance stays verifiable.
+* Two real corpora were **rejected on quality grounds** and the reasons are
+  recorded in the module docstring: the Brown corpus (distributed POS-tagged)
+  and Pang & Lee's movie reviews (distributed lowercased and pre-tokenised).
+  Together they were 17 MB — more than half again the literary corpus. Volume
+  was not a good enough reason to teach the model damaged typography.
+* Validation is held out **per source, by character count**, not by document
+  count across a concatenation, so the number measures the real mixture.
+
+When you add data, add it that way. When you reject data, write down why.
+
 ---
 
 ## 2. No shortcuts, anywhere
@@ -86,6 +105,17 @@ runs.
 - ✅ If a task turns out to be bigger than expected, **do the whole thing or
   report exactly what is missing**. Never quietly deliver a narrower version
   and describe it as complete.
+- ✅ **Report what a model actually is.** Swift is a 9.9M-parameter base model:
+  it continues text, it cannot call tools, it has no reasoning phase. The
+  engine declares those limits in `capabilities`, the model spec declares them
+  in `supports_tools` / `supports_thinking`, and the README states them in
+  plain words. Never advertise a capability the weights do not have and let the
+  runtime cover for it.
+- ✅ **Write down the bugs and the judgement calls.** When the byte-coverage
+  test found that the pre-tokenizer was silently deleting every underscore, the
+  fix, the measured impact (1,249 characters out of 27M — 0.0046%) and the
+  decision not to restart a 2.5-hour run all went into `docs/TRAINING.md`. A
+  quietly-fixed bug is a bug nobody can audit.
 
 ---
 
@@ -102,6 +132,8 @@ absorbing them without rewrites.
   → `docs/ADDING_A_TOOL.md`
 - **Adding an engine** = one new class + one line in `engines/registry.py`.
   → `docs/ADDING_AN_ENGINE.md`
+- **Training a model** = a corpus in `training/data.py`, a `SwiftConfig`, a run.
+  → `docs/TRAINING.md`
 - **The thinking scale is engine-agnostic.** Never add an eighth level and
   never put engine-specific parameters in `thinking.py`. A `ThinkingProfile`
   carries the intent in three encodings; each engine picks the one it speaks.
@@ -117,8 +149,9 @@ unless there is a real reason not to.
 Future sessions of this project will add models and tools, so **write for the
 person who arrives next**.
 
-- Comment **why**, not what. `swift.py` is the model of this: it explains why
-  the ceiling is `SOL` and why unset sampling fields stay unset.
+- Comment **why**, not what. `swift.py` is the model of this: it explains why a
+  base model ships no system prompt, why its thinking ceiling is `DO`, and why
+  unset sampling fields stay unset.
 - Registries and extension points carry a block comment naming the procedure
   for extending them.
 - Update the relevant `docs/*.md` in the same change as the code. Documentation
@@ -137,7 +170,8 @@ person who arrives next**.
 
 ```bash
 pytest -m "not integration"   # everything that needs no engine
-pytest -m integration         # real inference; needs `ollama serve`
+pytest -m integration         # real inference against a live engine
+pytest -m torch               # the training stack; needs the `training` extra
 ruff check . && mypy          # both must be clean before committing
 ```
 
@@ -172,3 +206,10 @@ ruff check . && mypy          # both must be clean before committing
 הוספת מודל = קובץ אחד ושורה אחת ברג'יסטרי. הוספת כלי = פונקציה אחת. הוספת מנוע
 = מחלקה אחת ושורה אחת. סולם החשיבה נשאר בלתי תלוי במנוע — שבעה צלילים, בלי
 הוספות ובלי פרמטרים ספציפיים למנוע.
+
+**דיווח כן על מה שהמודל באמת יודע.**
+Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טקסט, לא מפעיל כלים ואין לו שלב
+חשיבה. המגבלות האלה מוצהרות בקוד (`capabilities`, `supports_tools`,
+`supports_thinking`) ובתיעוד. אסור לפרסם יכולת שהמשקולות לא באמת מספקות ולתת
+לקוד לכסות על זה. כשמתגלה באג — כותבים אותו, את ההשפעה המדודה ואת ההחלטה
+שהתקבלה, ולא מתקנים בשקט.

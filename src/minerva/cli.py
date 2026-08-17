@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -107,7 +108,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(style.red(f"  !!  engine {engine.name}: {health}"))
         print()
-        print("  To fix: install Ollama from https://ollama.com, then run `ollama serve`.")
+        # Advice has to match the engine: one is trained, the other is served.
+        if engine.name == "minerva":
+            print("  To fix, build the data and train a model:")
+            print("    minerva prepare-data")
+            print("    minerva train --out checkpoints/swift")
+        else:
+            print("  To fix: install Ollama from https://ollama.com, then run `ollama serve`.")
         return 1
 
     print()
@@ -222,7 +229,14 @@ def cmd_pull(args: argparse.Namespace) -> int:
     engine = get_engine(spec.engine, config=config)
 
     if not hasattr(engine, "pull"):
-        print(style.red(f"engine {engine.name!r} does not support pulling models"))
+        print(
+            style.red(
+                f"engine {engine.name!r} has nothing to pull: its weights are trained, "
+                f"not downloaded."
+            )
+        )
+        print("  Build the data first:  minerva prepare-data")
+        print(f"  Then train:            minerva train --out checkpoints/{spec.name}")
         return 1
 
     tag = spec.engine_model
@@ -244,6 +258,59 @@ def cmd_pull(args: argparse.Namespace) -> int:
     print()
     print(style.green(f"done: {tag} is installed"))
     return 0
+
+
+def cmd_prepare_data(args: argparse.Namespace) -> int:
+    """Build the corpus, train the tokenizer, and pack tokens - all for real."""
+    from .training.data import build_corpus
+    from .training.dataset import encode_corpus
+    from .training.tokenizer import BPETokenizer
+
+    style = _style(args.no_color)
+    data_dir = args.data
+
+    print(style.bold("1/3  building the corpus from real sources"))
+    manifest = build_corpus(data_dir)
+    chars = manifest["characters"]
+    assert isinstance(chars, dict)
+    print(f"     train {chars['train'] / 1e6:.2f} MB   val {chars['val'] / 1e6:.2f} MB")
+
+    tokenizer_path = data_dir / "tokenizer.json"
+    if tokenizer_path.exists() and not args.force:
+        print(style.dim(f"\n2/3  tokenizer exists at {tokenizer_path} (use --force to retrain)"))
+        tokenizer = BPETokenizer.load(tokenizer_path)
+    else:
+        print(style.bold(f"\n2/3  training a byte-level BPE tokenizer (vocab {args.vocab_size})"))
+        text = (data_dir / "train.txt").read_text(encoding="utf-8")
+        tokenizer = BPETokenizer.train(text, args.vocab_size)
+        tokenizer.save(tokenizer_path)
+
+    print(style.bold("\n3/3  tokenizing"))
+    for split in ("train", "val"):
+        encode_corpus(data_dir / f"{split}.txt", tokenizer, data_dir / f"{split}.bin")
+
+    print(style.green(f"\nready. Train with: minerva train --data {data_dir}"))
+    return 0
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    """Pretrain a Minerva model from scratch."""
+    from .training.trainer import main as train_main
+
+    forwarded: list[str] = ["--data", str(args.data), "--out", str(args.out)]
+    for flag, value in (
+        ("--steps", args.steps),
+        ("--lr", args.lr),
+        ("--batch-size", args.batch_size),
+        ("--grad-accum", args.grad_accum),
+        ("--seq-len", args.seq_len),
+        ("--max-hours", args.max_hours),
+        ("--threads", args.threads),
+        ("--resume", args.resume),
+    ):
+        if value is not None:
+            forwarded += [flag, str(value)]
+    return train_main(forwarded)
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
@@ -437,7 +504,28 @@ def build_parser() -> argparse.ArgumentParser:
     pull.add_argument("model", nargs="?", help="Minerva model name (default: swift)")
     pull.set_defaults(func=cmd_pull)
 
-    ask = sub.add_parser("ask", parents=[common, generation], help="ask a single question")
+    prepare = sub.add_parser(
+        "prepare-data", parents=[common], help="build the corpus and tokenizer"
+    )
+    prepare.add_argument("--data", type=Path, default=Path("data"))
+    prepare.add_argument("--vocab-size", type=int, default=8192)
+    prepare.add_argument("--force", action="store_true", help="retrain the tokenizer")
+    prepare.set_defaults(func=cmd_prepare_data)
+
+    train = sub.add_parser("train", parents=[common], help="pretrain a model from scratch")
+    train.add_argument("--data", type=Path, default=Path("data"))
+    train.add_argument("--out", type=Path, default=Path("checkpoints/swift"))
+    train.add_argument("--steps", type=int, default=None)
+    train.add_argument("--lr", type=float, default=None)
+    train.add_argument("--batch-size", type=int, default=None)
+    train.add_argument("--grad-accum", type=int, default=None)
+    train.add_argument("--seq-len", type=int, default=None)
+    train.add_argument("--max-hours", type=float, default=None)
+    train.add_argument("--threads", type=int, default=None)
+    train.add_argument("--resume", type=Path, default=None)
+    train.set_defaults(func=cmd_train)
+
+    ask = sub.add_parser("ask", parents=[common, generation], help="continue a prompt")
     ask.add_argument("prompt", help="the question")
     ask.add_argument(
         "--show-tools", action="store_true", help="print tool calls as they happen"

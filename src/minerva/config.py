@@ -44,8 +44,15 @@ class MinervaConfig:
     """Process-wide settings."""
 
     # -- engine ----------------------------------------------------------
-    engine: str = "ollama"
-    """Which engine to use by default. See :func:`minerva.engines.available_engines`."""
+    engine: str = "minerva"
+    """Which engine to use by default: ``"minerva"`` runs our own trained
+    weights in-process; ``"ollama"`` serves third-party weights."""
+
+    checkpoint_dir: str = "checkpoints"
+    """Where trained Minerva checkpoints live (``MINERVA_CHECKPOINT_DIR``)."""
+
+    torch_threads: int | None = None
+    """CPU threads for the native engine. ``None`` keeps torch's own default."""
 
     ollama_host: str = "http://127.0.0.1:11434"
     """Base URL of the Ollama daemon (``MINERVA_OLLAMA_HOST``)."""
@@ -130,6 +137,8 @@ def _coerce(name: str, value: Any, target: Any) -> Any:
 #: field name -> (python type, is_optional)
 _FIELD_TYPES: dict[str, type] = {
     "engine": str,
+    "checkpoint_dir": str,
+    "torch_threads": int,
     "ollama_host": str,
     "request_timeout": float,
     "keep_alive": str,

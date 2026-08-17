@@ -61,8 +61,9 @@ class TestInformationalCommands:
         assert main(["models", "--no-color", "-v"]) == 0
         out = capsys.readouterr().out
         assert "Minerva Swift" in out
-        assert "qwen3:1.7b" in out
-        assert "fa (פה)" in out
+        assert "minerva:swift" in out, "Swift runs on Minerva's own engine"
+        assert "9.9M" in out
+        assert "do (דו)" in out, "a base model reports the silent thinking level"
 
     def test_tools_lists_the_builtins_with_their_parameters(
         self, capsys: pytest.CaptureFixture
@@ -81,16 +82,29 @@ class TestInformationalCommands:
 
 
 class TestErrorHandling:
-    def test_an_unreachable_engine_gives_a_nonzero_exit_and_advice(
+    def test_an_unreachable_ollama_gives_a_nonzero_exit_and_advice(
         self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Port 1 is reserved; nothing is listening there. This is a real
         # connection failure, not a simulated one.
+        monkeypatch.setenv("MINERVA_ENGINE", "ollama")
         monkeypatch.setenv("MINERVA_OLLAMA_HOST", "http://127.0.0.1:1")
         assert main(["doctor", "--no-color"]) == 1
         out = capsys.readouterr().out
         assert "unreachable" in out
         assert "ollama serve" in out
+
+    def test_missing_checkpoints_advise_training_not_downloading(
+        self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        monkeypatch.setenv("MINERVA_ENGINE", "minerva")
+        monkeypatch.setenv("MINERVA_CHECKPOINT_DIR", str(tmp_path / "empty"))
+        assert main(["doctor", "--no-color"]) == 1
+        out = capsys.readouterr().out
+        assert "minerva train" in out
+        assert "prepare-data" in out
+        # The engine list legitimately names ollama; the *advice* must not.
+        assert "ollama serve" not in out, "wrong advice for the native engine"
 
     def test_an_unknown_thinking_level_is_reported_not_traced(
         self, capsys: pytest.CaptureFixture

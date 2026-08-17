@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from conftest import CAPABLE_SPEC
 from minerva.engines.base import SamplingParams
 from minerva.engines.ollama import OllamaEngine
 from minerva.errors import CapabilityError, ModelNotFoundError
@@ -27,7 +28,8 @@ def offline_engine() -> OllamaEngine:
 
 @pytest.fixture
 def model(offline_engine: OllamaEngine) -> MinervaModel:
-    return MinervaModel(SWIFT, offline_engine, tools=default_registry())
+    """A tool- and thinking-capable model. See CAPABLE_SPEC in conftest."""
+    return MinervaModel(CAPABLE_SPEC, offline_engine, tools=default_registry())
 
 
 class TestCatalogue:
@@ -83,43 +85,55 @@ class TestCatalogue:
 
 
 class TestSwiftSpec:
-    def test_it_is_the_small_tier_and_targets_a_small_model(self) -> None:
+    """Swift is now Minerva's own trained base model, not a pointer at Ollama."""
+
+    def test_it_runs_on_minervas_own_engine(self) -> None:
+        assert SWIFT.engine == "minerva"
+        assert SWIFT.engine_model == "swift", "the native engine keys on the checkpoint dir"
+        assert SWIFT.engine_model_fallbacks == (), "there is nothing to fall back to"
+
+    def test_it_is_the_small_tier(self) -> None:
         assert SWIFT.tier == "small"
-        assert SWIFT.engine_model == "qwen3:1.7b"
-        assert SWIFT.engine_model_fallbacks
+        assert SWIFT.parameter_count == "9.9M"
 
-    def test_it_supports_tools_and_thinking(self) -> None:
-        assert SWIFT.supports_tools
-        assert SWIFT.supports_thinking
+    def test_it_is_a_base_model_and_says_so(self) -> None:
+        # These are facts about Swift's training, not gaps in the platform.
+        assert SWIFT.supports_tools is False
+        assert SWIFT.supports_thinking is False
 
-    def test_its_ceiling_is_sol(self) -> None:
-        # Deliberate: a 1.7B model gains nothing from LA/SI.
-        assert SWIFT.max_thinking is ThinkingLevel.SOL
-        assert SWIFT.default_thinking is ThinkingLevel.FA
+    def test_it_ships_no_system_prompt(self) -> None:
+        # A base model has never seen one; sending it would corrupt the prompt.
+        assert SWIFT.system_prompt is None
 
-    def test_it_ships_a_system_prompt(self) -> None:
-        assert SWIFT.system_prompt
-        assert "Swift" in SWIFT.system_prompt
-
-    def test_its_sampling_defaults_are_set_deliberately(self) -> None:
-        assert SWIFT.sampling.temperature == 0.7
+    def test_its_context_matches_what_it_was_trained_on(self) -> None:
+        assert SWIFT.context_length == 512
         assert SWIFT.sampling.context_length == SWIFT.context_length
+
+    def test_its_sampling_defaults_suit_a_small_base_model(self) -> None:
+        assert SWIFT.sampling.temperature == 0.8
+        assert SWIFT.sampling.top_k == 40
+        assert SWIFT.sampling.repeat_penalty is not None
+        assert SWIFT.sampling.repeat_penalty > 1.0, "small models loop without a penalty"
+
+    def test_every_thinking_request_resolves_to_silence(self) -> None:
+        for level in ThinkingLevel:
+            assert SWIFT.resolve_thinking(level) is ThinkingLevel.DO
 
 
 class TestThinkingResolution:
     def test_none_falls_back_to_the_model_default(self) -> None:
-        assert SWIFT.resolve_thinking(None) is ThinkingLevel.FA
+        assert CAPABLE_SPEC.resolve_thinking(None) is ThinkingLevel.FA
 
     def test_requests_above_the_ceiling_are_clamped_not_rejected(self) -> None:
-        assert SWIFT.resolve_thinking("si") is ThinkingLevel.SOL
-        assert SWIFT.resolve_thinking("la") is ThinkingLevel.SOL
+        assert CAPABLE_SPEC.resolve_thinking("si") is ThinkingLevel.SOL
+        assert CAPABLE_SPEC.resolve_thinking("la") is ThinkingLevel.SOL
 
     def test_requests_below_the_ceiling_pass_through(self) -> None:
-        assert SWIFT.resolve_thinking("mi") is ThinkingLevel.MI
-        assert SWIFT.resolve_thinking("דו") is ThinkingLevel.DO
+        assert CAPABLE_SPEC.resolve_thinking("mi") is ThinkingLevel.MI
+        assert CAPABLE_SPEC.resolve_thinking("דו") is ThinkingLevel.DO
 
     def test_a_model_without_thinking_always_resolves_to_do(self) -> None:
-        plain = SWIFT.with_overrides(name="plain", supports_thinking=False)
+        plain = CAPABLE_SPEC.with_overrides(name="plain", supports_thinking=False)
         assert plain.resolve_thinking("sol") is ThinkingLevel.DO
 
 
@@ -127,7 +141,7 @@ class TestRequestBuilding:
     def test_the_system_prompt_is_prepended(self, model: MinervaModel) -> None:
         request = model.build_request([user("hi")], verify_installed=False)
         assert request.messages[0].role is Role.SYSTEM
-        assert request.messages[0].content == SWIFT.system_prompt
+        assert request.messages[0].content == CAPABLE_SPEC.system_prompt
         assert request.messages[1].content == "hi"
 
     def test_a_caller_supplied_system_prompt_is_not_duplicated(
@@ -186,12 +200,12 @@ class TestRequestBuilding:
             [user("hi")], sampling=SamplingParams(temperature=0.1), verify_installed=False
         )
         assert request.sampling.temperature == 0.1
-        assert request.sampling.top_p == SWIFT.sampling.top_p, "unset fields are inherited"
+        assert request.sampling.top_p == CAPABLE_SPEC.sampling.top_p, "unset fields are inherited"
 
     def test_a_model_that_cannot_use_tools_refuses_them(
         self, offline_engine: OllamaEngine
     ) -> None:
-        spec = SWIFT.with_overrides(name="no-tools", supports_tools=False)
+        spec = CAPABLE_SPEC.with_overrides(name="no-tools", supports_tools=False)
         model = MinervaModel(spec, offline_engine, tools=default_registry())
         with pytest.raises(CapabilityError, match="does not support tool calling"):
             model.build_request([user("hi")], verify_installed=False)
@@ -201,7 +215,7 @@ class TestEngineModelResolution:
     def test_without_verification_the_preferred_tag_is_used(
         self, model: MinervaModel
     ) -> None:
-        assert model.resolve_engine_model(verify=False) == "qwen3:1.7b"
+        assert model.resolve_engine_model(verify=False) == "test-model:1b"
 
 
 class TestSamplingMerge:

@@ -18,6 +18,7 @@ from .base import (
     StreamChunk,
     Usage,
 )
+from .native import NativeEngine
 from .ollama import OllamaEngine
 from .registry import (
     available_engines,
@@ -33,6 +34,7 @@ __all__ = [
     "EngineHealth",
     "GenerationRequest",
     "GenerationResult",
+    "NativeEngine",
     "OllamaEngine",
     "SamplingParams",
     "StreamChunk",

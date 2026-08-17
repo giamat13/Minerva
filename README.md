@@ -1,123 +1,177 @@
 # Minerva
 
-**An AI model platform. The first model in the family is Swift.**
+**An AI model company. Our first model is Swift, and we trained it ourselves.**
 
-Minerva runs language models locally against a real inference engine, with tool
-calling, a seven-level thinking scale, and a structure built from day one to
-hold more than one model.
+Swift is not a fine-tune and not a wrapper around someone else's weights. Its
+architecture, its tokenizer, its training corpus and every one of its 9,875,520
+parameters come from this repository. `minerva train` reproduces it from
+scratch.
 
-There is no simulation anywhere in this repository. Every code path talks to a
-real engine; when no engine is reachable, Minerva says so and stops.
+Minerva is also the platform around the model: a real inference engine, tool
+calling, a seven-level thinking scale, and a structure built to hold the models
+that come after Swift.
+
+Nothing here is simulated. There are no mock engines, and where something could
+not be verified, this README says so.
 
 ---
 
 ## Why these names
 
-### Minerva — the platform
+### Minerva — the company
 
 Minerva is the Roman goddess of **wisdom, craft and strategy** — and, notably,
 not of raw force. She is the goddess of the *skilled* act: the weaver, the
 artisan, the strategist who wins by thinking rather than by overwhelming.
 
-That is the argument this project is making. An AI platform does not have to be
-the largest to be the most useful; it has to be the most deliberate. Minerva's
-symbol is the owl, the bird that sees in the dark — an appropriate emblem for
-software whose job is to make sense of things with incomplete light.
+That is the argument this project makes. We cannot outspend anyone on compute.
+What we can do is be deliberate: real data chosen example by example, an
+architecture understood component by component, hyper-parameters picked by
+experiment rather than assumption, and honest reporting of what came out.
 
-The name also sets the standard the project holds itself to, written down in
-[`CLAUDE.md`](CLAUDE.md): craft over volume. Real code, real training data,
-no shortcuts.
+Her symbol is the owl — the bird that sees in the dark.
 
 ### Swift — the first model
 
-The swift is a small bird — roughly forty grams — that spends almost its entire
-life airborne. It eats, sleeps and mates on the wing, and can stay aloft for
+The swift is a small bird, roughly forty grams, that spends almost its entire
+life airborne. It eats, sleeps and mates on the wing and can stay aloft for
 months without landing. It is not the largest bird in the sky. It is the one
 that never has to stop.
 
-That is the design brief for this model exactly:
-
 | The bird | The model |
 |---|---|
-| ~40 grams | ~1.7B parameters — small enough to stay resident on a laptop |
-| Fastest bird in level flight | Fast enough that you never wait for it |
-| Lives in the air, rarely lands | Runs locally, always on, no round trip to a datacentre |
-| Small but far from simple — it navigates continents | Small but capable — it reasons and calls tools |
+| ~40 grams | 9.9M parameters — runs on a laptop CPU |
+| Fastest bird in level flight | Generates without a GPU |
+| Lives in the air, rarely lands | Runs in-process; no daemon, no datacentre |
+| Small but far from simple — it navigates continents | Small but genuinely trained: a full modern transformer stack |
 
-Swift is the smallest model in the family. Later models will be named for
-larger, slower, more far-seeing birds — the family grows upward from here.
+Later models will be named for larger, slower, further-seeing birds. The family
+grows upward from here.
 
 ---
 
-## What the system is for
+## How Swift was made
 
-Three things, in order of importance:
+The whole pipeline is in this repository and reproducible in three commands.
 
-1. **Run real models locally, properly.** Not a demo, not a wrapper with a
-   `sleep()` in it. A production-shaped client for a real engine, with
-   streaming, tool calling, timeouts, health checks and honest error messages.
+```bash
+minerva prepare-data     # real corpus -> BPE tokenizer -> token bins
+minerva train            # pretrain from scratch
+minerva ask "The"        # run the weights you just trained
+```
 
-2. **Make deliberation a dial, not an accident.** Most systems treat "how hard
-   should the model think?" as an implicit property of the prompt. Minerva
-   makes it an explicit, named parameter — seven levels on the solfège scale —
-   so you can spend reasoning where it pays and skip it where it does not.
+**1. The corpus** — ~27 MB of real, human-written English prose across six
+sources and four registers: Project Gutenberg literature, Reuters newswire,
+European Parliament debate, US political oratory, and informal web text. Every
+source is downloaded from its original distributor with its licence and origin
+recorded in a generated `manifest.json`. Nothing is templated, generated or
+augmented.
 
-3. **Be ready for the models that come next.** Swift is the first, not the
-   only. Adding a model is one new file and one line in a registry. The
-   architecture is the point; Swift is the proof it works.
+Two available corpora were **rejected on quality grounds**: the Brown corpus
+(distributed POS-tagged) and Pang & Lee's movie reviews (distributed lowercased
+and pre-tokenised). Together they would have added 17 MB. Volume was not a good
+enough reason to teach the model damaged typography.
+
+**2. The tokenizer** — a byte-level BPE, implemented here and trained on that
+corpus in 95 seconds. 8,192 tokens, all 256 byte values in the base vocabulary
+(so there is no unknown token), digits always split individually. Measured
+compression: 3.66 characters per token → 7,377,901 training tokens.
+
+**3. The architecture** — `SwiftLM`, a decoder-only transformer: pre-norm
+RMSNorm, RoPE, SwiGLU feed-forward, grouped-query-capable attention, tied
+embeddings, scaled residual init.
+
+```python
+SwiftConfig(vocab_size=8192, n_layer=6, n_head=8, d_model=320, max_seq_len=512)
+# 9,875,520 parameters (7,254,080 non-embedding)
+```
+
+**4. The run** — sized from measured hardware, not guessed. The machine does
+430 GFLOPS of fp32 matmul and ~3–4k training tokens/second on 4 CPU cores; at
+`6ND` FLOPs that put the compute-optimal point near 9.9M parameters × 37M
+tokens ≈ 5 epochs. The learning rate came from a real 70-step probe over
+{1,2,3,5}×10⁻³ before committing to the run.
+
+Full detail, including the sizing arithmetic and a bug the tests caught, is in
+[`docs/TRAINING.md`](docs/TRAINING.md).
+
+---
+
+## What Swift is, and what it is not
+
+**Swift is a base language model.** It was pretrained to predict the next token
+and has had no instruction tuning, no chat tuning and no RLHF. So:
+
+* It **continues text**. Give it `"The Bahia cocoa zone"` and it writes
+  plausible newswire. Give it `"What is the capital of France?"` and it will
+  most likely write *more questions* — because that is what follows a question
+  in its training data.
+* It **cannot call tools.** Tool calling is a trained behaviour.
+* It **has no reasoning phase**, so every thinking level resolves to `do`.
+
+These are facts about its training stage, not gaps in the platform, and the
+code states them rather than papering over them: `NativeEngine.capabilities`
+reports `tools=False`, and asking for tools raises instead of silently
+returning nothing.
+
+At 9.9M parameters on 27 MB, Swift is the scale of a small research baseline.
+It learns grammar, vocabulary, register and local coherence. **It is not a
+chatbot and this project will not describe it as one.**
 
 ---
 
 ## The thinking scale
 
-Minerva controls deliberation with the seven notes of the solfège scale, in
-ascending order. A higher note is a higher pitch of thinking.
+Minerva controls deliberation with the seven notes of the solfège scale.
 
-| # | Note | Hebrew | Budget | Effort | Extended | Meaning |
-|---|------|--------|--------|--------|----------|---------|
-| 0 | `do`  | דו  | –      | off    | no  | Silent — answer immediately, no reasoning phase |
-| 1 | `re`  | רה  | 256    | low    | no  | Whisper — a brief sanity check |
-| 2 | `mi`  | מי  | 1,024  | low    | no  | Quiet — short reasoning for simple multi-step questions |
-| 3 | `fa`  | פה  | 4,096  | medium | no  | Moderate — the balanced default |
-| 4 | `sol` | סול | 8,192  | medium | no  | Strong — sustained reasoning for hard problems |
-| 5 | `la`  | לה  | 16,384 | high   | **yes** | Loud — **Extended Thinking** |
-| 6 | `si`  | סי  | 32,768 | high   | **yes** | Full voice — Extended Thinking at maximum depth |
+| # | Note | Hebrew | Budget | Effort | Extended |
+|---|------|--------|--------|--------|----------|
+| 0 | `do`  | דו  | –      | off    | no |
+| 1 | `re`  | רה  | 256    | low    | no |
+| 2 | `mi`  | מי  | 1,024  | low    | no |
+| 3 | `fa`  | פה  | 4,096  | medium | no |
+| 4 | `sol` | סול | 8,192  | medium | no |
+| 5 | `la`  | לה  | 16,384 | high   | **yes** |
+| 6 | `si`  | סי  | 32,768 | high   | **yes** |
 
-**Extended Thinking** (`la` and `si`) does more than lengthen the reasoning: it
-**preserves** the reasoning trace across turns, so the model builds on its
-earlier thinking instead of re-deriving it. Below `la` the trace is treated as
-scratch work and dropped once the turn ends.
+`la` and `si` enable **Extended Thinking**: the reasoning trace is preserved
+across turns rather than dropped as scratch work.
 
-Every level is accepted by Latin name, Hebrew name, index, or a plain-language
-alias:
+Levels are accepted by Latin name, Hebrew name, index or alias:
 
 ```bash
-minerva ask -t sol  "..."      # Latin
-minerva ask -t סול  "..."      # Hebrew
-minerva ask -t 4    "..."      # index
-minerva ask -t high "..."      # alias
+minerva ask -t sol "..."     minerva ask -t סול "..."
+minerva ask -t 4   "..."     minerva ask -t high "..."
 ```
 
-Each model declares its own ceiling. Swift tops out at `sol` — pushing a 1.7B
-model to `si` buys drift, not insight — and requests above the ceiling are
-**clamped, never rejected**, so the same code works unchanged against a larger
-Minerva model later.
+The scale is **engine-agnostic**: a `ThinkingProfile` carries the same intent in
+three encodings (on/off, coarse effort, token budget) and each engine picks the
+one it speaks. Each model declares its own ceiling, and requests above it are
+**clamped, never rejected**.
+
+Swift's ceiling is `do`, because Swift cannot reason — so the scale currently
+degrades to silence for it. That is the honest state today; the scale is
+platform machinery waiting for a model trained to use it.
 
 ---
 
 ## Install
 
-Requires Python 3.11+ and a running [Ollama](https://ollama.com).
+Python 3.11+.
 
 ```bash
 git clone https://github.com/giamat13/minerva
 cd minerva
-pip install -e ".[dev]"
+pip install -e ".[training]"      # torch + numpy, needed to train or run Swift
 
-ollama serve &          # start the engine
-minerva pull swift      # fetch Swift's weights (~1.4 GB)
-minerva doctor          # verify: engine reachable, weights installed
+minerva prepare-data              # downloads ~28 MB, trains the tokenizer
+minerva train                     # pretrains from scratch
+minerva doctor                    # verify: engine ready, checkpoint present
 ```
+
+The core platform has exactly **one** runtime dependency (`httpx`). PyTorch is
+an optional extra, so using Minerva against an external engine stays a
+one-dependency install.
 
 ---
 
@@ -126,78 +180,48 @@ minerva doctor          # verify: engine reachable, weights installed
 ### Command line
 
 ```bash
-minerva ask "What is 17 * 43?"                  # one question
-minerva ask -t sol --show-thinking "..."        # crank the thinking up, show it
-minerva chat                                    # interactive, with memory
-minerva models -v                               # the catalogue
-minerva tools                                   # what the model can call
-minerva thinking                                # the scale
-minerva doctor                                  # is anything actually working?
+minerva ask "It is a truth universally"      # continue a prompt
+minerva ask --no-stream -m swift "The"       # wait for the full continuation
+minerva models -v                            # the catalogue
+minerva thinking                             # the scale
+minerva doctor                               # is anything actually working?
+minerva train --resume checkpoints/swift/last.pt
 ```
-
-Inside `minerva chat`, `/thinking sol` changes the level mid-conversation and
-`/reset` clears the transcript.
 
 ### Python
 
 ```python
-from minerva import Agent, load_model
+from minerva import load_model
 
-model = load_model("swift")
-
-# Simplest form.
-print(model.ask("Why do swifts sleep in flight?", thinking="mi"))
-
-# With tools: the agent loop runs them for real and feeds results back.
-agent = Agent(model, thinking="sol")
-run = agent.run("What is 4871 * 293, and what day of the week is it today?")
-print(run.answer)
-print(f"{len(run.tool_calls)} tool call(s), {run.completion_tokens} tokens")
+model = load_model("swift")          # loads our checkpoint in-process
+print(model.ask("It is a truth universally"))
 ```
 
-### A custom tool
-
-The schema the model sees is derived from the type hints and the docstring, so
-there is no second copy of the signature to drift:
+### Training from Python
 
 ```python
-from minerva import Agent, ToolRegistry, load_model, tool
+from minerva.training import SWIFT_CONFIG, SwiftLM, TokenDataset, TrainConfig, Trainer
 
-@tool
-def check_stock(product: str) -> dict:
-    """Check how many units of a product are in the warehouse.
-
-    Use this whenever you are asked about availability. Never guess.
-
-    Args:
-        product: The product name, e.g. "swift".
-    """
-    return {"product": product, "units": inventory[product]}
-
-agent = Agent(load_model("swift"), tools=ToolRegistry([check_stock]))
-print(agent.run("How many swifts do we have?").answer)
+model = SwiftLM(SWIFT_CONFIG)
+trainer = Trainer(
+    model,
+    TokenDataset("data/train.bin", 512),
+    TokenDataset("data/val.bin", 512),
+    TrainConfig(max_steps=4500, learning_rate=2e-3),
+    out_dir="checkpoints/swift",
+)
+trainer.train()
 ```
 
-### Conversations
-
-```python
-from minerva import Session, load_model
-
-session = Session(load_model("swift"), thinking="fa")
-session.send("My name is Dana and I keep bees.")
-print(session.send("What is my name?"))      # remembers
-session.save("conversation.json")
-```
-
-Runnable versions of all of this are in [`examples/`](examples/).
+Runnable examples are in [`examples/`](examples/).
 
 ---
 
 ## The model family
 
-| Model | Tier | Size | Engine model | Thinking | Tools |
-|-------|------|------|--------------|----------|-------|
-| **Swift** | small | 1.7B | `qwen3:1.7b` | default `fa`, max `sol` | ✅ |
+| Model | Tier | Params | Trained on | Engine | Tools | Thinking |
+|-------|------|--------|------------|--------|-------|----------|
+| **Swift** | small | 9.9M | 27 MB, from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
 
 More models are coming; the registry is built to take them.
 See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
@@ -208,68 +232,49 @@ See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
 
 ```
 src/minerva/
-├── thinking.py         The solfège scale — engine-agnostic, seven notes
-├── messages.py         Conversation primitives shared by every layer
-├── config.py           Settings: defaults < TOML file < MINERVA_* env vars
-├── errors.py           One exception hierarchy, actionable messages
+├── training/           HOW A MINERVA MODEL IS MADE
+│   ├── data.py           Corpus: real sources, licences, cleaning, split
+│   ├── tokenizer.py      Byte-level BPE, implemented and trained here
+│   ├── dataset.py        Memory-mapped token batches
+│   ├── model.py          SwiftLM: RMSNorm, RoPE, SwiGLU, GQA, tied embeddings
+│   └── trainer.py        AdamW, cosine schedule, checkpointing, resume
 ├── engines/            WHAT RUNS A MODEL
-│   ├── base.py           The Engine contract
-│   ├── ollama.py         Real Ollama HTTP client — streaming, tools, thinking
+│   ├── native.py         Runs OUR checkpoints in-process
+│   ├── ollama.py         Runs third-party weights via a local daemon
 │   └── registry.py       ← add new engines here
 ├── models/             WHAT A MODEL IS
-│   ├── base.py           ModelSpec (inert data) + MinervaModel (spec + engine)
-│   ├── swift.py          Swift — written as the template for future models
+│   ├── swift.py          Swift's spec — written as the template for the next
 │   └── registry.py       ← add new models here
 ├── tools/              WHAT A MODEL CAN CALL
-│   ├── base.py           @tool decorator; JSON Schema from type hints
-│   ├── registry.py       Tool sets, real execution, error feedback
-│   └── builtin/          calculate, current_time, days_between
-├── runtime/            THE LOOP
-│   ├── agent.py          Generation + real tool execution, to a final answer
-│   └── session.py        Multi-turn memory + the Extended Thinking policy
+├── runtime/            The agent loop and multi-turn sessions
+├── thinking.py         The solfège scale — engine-agnostic, seven notes
 └── cli.py              The `minerva` command
 ```
 
 The separation between `models/` and `engines/` is the load-bearing decision: a
-model is a specification you can print and diff, an engine is execution. That
-is what makes a new model a single file.
-
----
-
-## Configuration
-
-Defaults < `minerva.toml` < `MINERVA_*` environment variables < explicit
-arguments in code.
-
-```toml
-# minerva.toml
-ollama_host    = "http://127.0.0.1:11434"
-default_model  = "swift"
-thinking_level = "fa"        # or "פה", or 3
-show_thinking  = false
-enable_tools   = true
-```
-
-```bash
-export MINERVA_OLLAMA_HOST=http://gpu-box:11434
-export MINERVA_THINKING_LEVEL=סול
-```
+model is a specification you can print and diff, an engine is execution. Swift
+being trained here rather than downloaded changed one line of its spec —
+`engine="minerva"` — and nothing else in the platform.
 
 ---
 
 ## Development
 
 ```bash
-pytest -m "not integration"   # 284 tests, no engine required
-pytest -m integration         # real inference; needs `ollama serve` + weights
+pytest -m "not integration"   # no engine or GPU required
+pytest -m integration         # real inference against a live engine
 ruff check . && mypy          # both clean
 ```
 
 **On testing philosophy:** there are no mock engines in this repository, and
-there never will be. Unit tests cover real logic that genuinely needs no
-engine; integration tests talk to a live daemon and **skip with a stated
-reason** when one is not reachable. A green test run that proved nothing is
-worse than a skipped one.
+there never will be. Unit tests cover real logic; integration tests talk to a
+live engine and **skip with a stated reason** when one is not reachable. A green
+test run that proved nothing is worse than a skipped one.
+
+That policy pays: the tokenizer's byte-coverage test found a real bug in which
+every underscore was silently deleted from the corpus. It is documented,
+including why the training run was not restarted, in
+[`docs/TRAINING.md`](docs/TRAINING.md).
 
 Contributor rules — including the standard for training data — are in
 [`CLAUDE.md`](CLAUDE.md).
@@ -278,21 +283,23 @@ Contributor rules — including the standard for training data — are in
 
 ## תקציר בעברית
 
-**Minerva** היא פלטפורמת מודלי AI. השם הוא על שם האלה הרומית של החוכמה והמלאכה
-— לא של הכוח הגס. זו בדיוק הטענה של הפרויקט: מערכת טובה נמדדת בדיוק ובמלאכה,
-לא בגודל.
+**Minerva** היא חברת מודלי AI. השם על שם האלה הרומית של החוכמה והמלאכה — לא של
+הכוח הגס. זו בדיוק הטענה: מערכת טובה נמדדת בדיוק ובמלאכה, לא בגודל.
 
-**Swift** הוא המודל הראשון והקטן במשפחה, על שם הסיס — ציפור של כארבעים גרם
-שמבלה כמעט את כל חייה באוויר ואינה נאלצת לנחות. קטן, מהיר, תמיד זמין, ובכל
-זאת יודע לחשוב ולהפעיל כלים.
+**Swift** הוא המודל הראשון, על שם הסיס — ציפור של כארבעים גרם שמבלה כמעט את כל
+חייה באוויר ואינה נאלצת לנחות. הוא **אומן מאפס בתוך הפרויקט הזה**: הארכיטקטורה,
+הטוקנייזר, קורפוס האימון וכל 9,875,520 הפרמטרים נוצרו כאן. לא fine-tune ולא
+עטיפה למשקולות של מישהו אחר.
 
-**סולם החשיבה** בנוי משבעת צלילי הסולם — דו, רה, מי, פה, סול, לה, סי — מהשקט
-לחזק. `דו` הוא ללא חשיבה כלל, ו־`לה` ו־`סי` מפעילים Extended Thinking שבו עקבות
-החשיבה נשמרים בין תורות. אפשר לבחור צליל בשם לטיני, בשם עברי או במספר.
+**מה Swift כן ומה לא.** הוא מודל בסיס (base model): אומן לחזות את הטוקן הבא
+בלבד, בלי instruction tuning ובלי RLHF. לכן הוא **ממשיך טקסט** ולא עונה על
+שאלות, **לא יודע להפעיל כלים**, ו**אין לו שלב חשיבה**. אלה עובדות על שלב האימון
+שלו, לא חוסרים בפלטפורמה, והקוד מצהיר עליהן במפורש במקום להעמיד פנים.
 
-**המערכת בנויה להתרחבות**: הוספת מודל חדש = קובץ אחד ושורה אחת ברג'יסטרי;
-הוספת כלי = פונקציה אחת עם type hints ו-docstring. הכל קוד אמיתי שרץ מול מנוע
-אמיתי — בלי Mocks ובלי קיצורי דרך.
+**סולם החשיבה** בנוי משבעת הצלילים — דו, רה, מי, פה, סול, לה, סי. `לה` ו־`סי`
+מפעילים Extended Thinking. הסולם בלתי תלוי במנוע וממתין למודל שיאומן להשתמש בו.
+
+הכל קוד אמיתי שרץ — בלי Mocks ובלי קיצורי דרך.
 
 ---
 

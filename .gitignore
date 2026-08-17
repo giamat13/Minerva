@@ -23,3 +23,11 @@ coverage.xml
 # Local, machine-specific configuration (never commit endpoints/secrets).
 minerva.local.toml
 .env
+
+# Training artefacts. The corpus is downloaded by `minerva prepare-data`, not
+# vendored (see src/minerva/training/data.py), and checkpoints are large
+# binaries that belong in a release, not in git history.
+data/
+checkpoints/
+*.pt
+*.bin

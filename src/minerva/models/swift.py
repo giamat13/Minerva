@@ -1,18 +1,36 @@
-"""Swift - the first and smallest model in the Minerva family.
+"""Swift - the first model in the Minerva family, trained from scratch.
 
 Named after the bird. A swift weighs about forty grams and spends almost its
 whole life in the air; it is not the largest bird in the sky, it is the one
-that never has to stop. That is the design brief for this model: small enough
-to stay resident on a laptop, fast enough that you never wait for it, and
-capable enough to reason and call tools when the question deserves it.
+that never has to stop. That is the design brief: small enough to stay
+resident anywhere, fast enough that you never wait for it.
+
+What Swift is
+-------------
+Swift is **Minerva's own model**. Its architecture is
+:class:`minerva.training.model.SwiftLM`, its tokenizer was trained on
+Minerva's corpus, and every one of its ~9.9M parameters was learned by
+:mod:`minerva.training.trainer` from the real text described in
+:mod:`minerva.training.data`. Nothing here is a fine-tune of someone else's
+weights.
+
+Swift is a **base** language model. It was pretrained to predict the next
+token and has had no instruction tuning, no chat tuning and no RLHF, so:
+
+* it continues text rather than answering questions,
+* it cannot call tools, and
+* it has no reasoning phase, so every thinking level resolves to ``DO``.
+
+Those are training-stage facts, not missing plumbing, and the spec below
+states them honestly rather than advertising capabilities the weights do not
+have. See ``docs/TRAINING.md`` for what it would take to change each one.
 
 ------------------------------------------------------------------------------
 THIS FILE IS THE TEMPLATE FOR EVERY FUTURE MINERVA MODEL.
 ------------------------------------------------------------------------------
-To add a model (say, a mid-sized one), copy this file, change the values, and
-register the new spec in ``registry.py``. Read the comments below - they
-explain *why* each field is set the way it is, which is the part you actually
-need in order to make good choices for a different model.
+To add a model, copy this file, change the values, and register the new spec
+in ``registry.py``. The comments explain *why* each field is what it is, which
+is the part you need in order to make good choices for a different model.
 """
 
 from __future__ import annotations
@@ -21,84 +39,65 @@ from ..engines.base import SamplingParams
 from ..thinking import ThinkingLevel
 from .base import ModelSpec
 
-__all__ = ["SWIFT", "SWIFT_SYSTEM_PROMPT"]
-
-
-# The system prompt is part of the model's identity, so it lives with the spec
-# rather than being scattered across call sites. Keep it short: every token
-# here is a token the model does not get to spend on the user's actual problem,
-# and that pressure is real on a model this size.
-SWIFT_SYSTEM_PROMPT = """\
-You are Swift, the smallest and fastest model in the Minerva family.
-
-Answer directly and concisely. Prefer a short, correct answer over a long,
-hedged one. When you do not know something, say so plainly instead of guessing.
-
-You may be given tools. Use a tool whenever it gives a more reliable answer
-than reasoning alone - arithmetic, the current date and time, and anything
-else that depends on facts you cannot see. Never invent a tool result.\
-"""
+__all__ = ["SWIFT"]
 
 
 SWIFT = ModelSpec(
     # -- identity ------------------------------------------------------------
-    # `name` is Minerva's stable, user-facing handle. It must not change when
-    # the underlying weights are upgraded - that is the whole point of having
-    # a Minerva name separate from an engine tag.
+    # `name` is Minerva's stable, user-facing handle, and it is also the
+    # checkpoint directory name the native engine looks for
+    # (checkpoints/swift/best.pt). It must not change when the weights are
+    # retrained - that is the whole point of a Minerva name.
     name="swift",
     display_name="Minerva Swift",
-    # This versions the *specification* (prompt, sampling, defaults), not the
-    # weights. Bump it whenever you change anything below.
+    # This versions the *specification*. Retraining the weights bumps the
+    # checkpoint, not necessarily this.
     version="0.1.0",
     description=(
-        "The smallest, fastest Minerva model. Built for quick answers, tool "
-        "calling and interactive use on local hardware."
+        "Minerva's first model: a 9.9M-parameter decoder-only transformer "
+        "pretrained from scratch on 27 MB of real English prose. A base "
+        "language model - it continues text, it does not follow instructions."
     ),
     tier="small",
     # -- execution -----------------------------------------------------------
-    engine="ollama",
-    # The engine-side tag. Qwen3 1.7B is the primary target: it is genuinely
-    # small (~1.4 GB quantised), and it supports both tool calling and a
-    # reasoning phase, which is what lets Swift honour the full solfege scale.
-    engine_model="qwen3:1.7b",
-    # If the preferred tag is not installed we fall back rather than failing.
-    # Order matters: smaller and thinking-capable first, then anything that at
-    # least keeps Swift usable. Note that llama3.2:1b supports tools but not a
-    # reasoning phase - on that fallback, thinking levels degrade gracefully to
-    # a normal answer instead of erroring.
-    engine_model_fallbacks=(
-        "qwen3:0.6b",
-        "qwen3:4b",
-        "llama3.2:1b",
-    ),
-    system_prompt=SWIFT_SYSTEM_PROMPT,
-    # Decoding defaults. These are the values Qwen3 documents for its
-    # thinking-capable models: enough temperature to avoid the repetition loops
-    # small models fall into, low enough to stay on task. Anything left as
-    # None keeps the engine's own default rather than silently overriding the
-    # value baked into the model file.
+    # The native engine runs our own checkpoint in-process. No daemon, no
+    # third-party weights, no network.
+    engine="minerva",
+    # For the native engine this is the checkpoint directory name, not an
+    # external model tag.
+    engine_model="swift",
+    engine_model_fallbacks=(),
+    # A base model has never seen a system prompt, so giving it one would just
+    # feed it tokens it cannot interpret and corrupt the continuation.
+    system_prompt=None,
+    # Sampling defaults for a small base model. Temperature is kept below 1.0
+    # and top-k is fairly tight because a 9.9M model's tail is mostly noise;
+    # a mild repetition penalty holds off the loops small models fall into.
+    # context_length matches the trained max_seq_len exactly - RoPE would
+    # extrapolate beyond it, but the model has never been trained there.
     sampling=SamplingParams(
-        temperature=0.7,
-        top_p=0.8,
-        top_k=20,
-        min_p=0.0,
-        repeat_penalty=1.05,
-        context_length=8_192,
+        temperature=0.8,
+        top_k=40,
+        top_p=0.95,
+        repeat_penalty=1.1,
+        max_tokens=128,
+        context_length=512,
     ),
     # -- behaviour -----------------------------------------------------------
-    # FA (פה) is the balanced middle of the scale: enough deliberation for
-    # everyday questions without paying for it on trivial ones.
-    default_thinking=ThinkingLevel.FA,
-    # Swift's ceiling is SOL (סול). Asking a 1.7B model to think at LA or SI
-    # buys drift, not insight - past a point it talks itself out of correct
-    # answers. Requests above the ceiling are clamped, never rejected, so the
-    # same code works unchanged against a larger Minerva model later, where
-    # the ceiling will be SI and Extended Thinking will actually engage.
-    max_thinking=ThinkingLevel.SOL,
-    supports_tools=True,
-    supports_thinking=True,
+    # Swift has no reasoning phase to switch on: it was never trained to
+    # produce one. `supports_thinking=False` makes `resolve_thinking` return
+    # DO for every request, so the solfege scale degrades cleanly instead of
+    # pretending. A future Minerva model trained with reasoning traces flips
+    # these two lines and inherits the whole scale unchanged.
+    default_thinking=ThinkingLevel.DO,
+    max_thinking=ThinkingLevel.DO,
+    supports_thinking=False,
+    # Tool calling is a trained behaviour. Swift never saw a tool call in
+    # pretraining, so advertising it would be a lie the runtime would then
+    # have to cover for.
+    supports_tools=False,
     supports_vision=False,
-    context_length=8_192,
-    parameter_count="1.7B",
-    tags=("small", "fast", "local", "tools", "thinking"),
+    context_length=512,
+    parameter_count="9.9M",
+    tags=("small", "base", "from-scratch", "local", "cpu"),
 )

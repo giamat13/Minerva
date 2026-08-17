@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from conftest import CAPABLE_SPEC
 from minerva.engines.ollama import OllamaEngine
 from minerva.messages import Role, ToolCall, ToolResult
 from minerva.models.base import MinervaModel
@@ -40,7 +41,7 @@ def explode() -> str:
 @pytest.fixture
 def agent() -> Agent:
     """An agent bound to a real engine object; no inference happens in these tests."""
-    model = MinervaModel(SWIFT, OllamaEngine(host="http://127.0.0.1:11434"))
+    model = MinervaModel(CAPABLE_SPEC, OllamaEngine(host="http://127.0.0.1:11434"))
     return Agent(model, tools=ToolRegistry([add, explode]))
 
 
@@ -125,18 +126,23 @@ class TestIterationCeiling:
 
 class TestThinkingResolution:
     def test_the_models_ceiling_is_honoured(self, agent: Agent) -> None:
-        # Swift tops out at SOL, so asking for SI must clamp.
+        # CAPABLE_SPEC tops out at SOL, so asking for SI must clamp.
         assert agent._effective_level("si") is ThinkingLevel.SOL
 
     def test_the_agent_default_is_used_when_no_level_is_given(self) -> None:
-        model = MinervaModel(SWIFT, OllamaEngine(host="http://127.0.0.1:11434"))
+        model = MinervaModel(CAPABLE_SPEC, OllamaEngine(host="http://127.0.0.1:11434"))
         agent = Agent(model, thinking="mi")
         assert agent._effective_level(None) is ThinkingLevel.MI
 
     def test_a_per_run_level_wins(self) -> None:
-        model = MinervaModel(SWIFT, OllamaEngine(host="http://127.0.0.1:11434"))
+        model = MinervaModel(CAPABLE_SPEC, OllamaEngine(host="http://127.0.0.1:11434"))
         agent = Agent(model, thinking="mi")
         assert agent._effective_level("do") is ThinkingLevel.DO
+
+    def test_a_base_model_collapses_every_level_to_silence(self) -> None:
+        # Swift was never trained to reason, so the scale degrades to DO.
+        swift = MinervaModel(SWIFT, OllamaEngine(host="http://127.0.0.1:11434"))
+        assert Agent(swift, thinking="si")._effective_level(None) is ThinkingLevel.DO
 
 
 class TestPromptPreparation:
@@ -158,6 +164,6 @@ class TestPromptPreparation:
 class TestDefaults:
     def test_an_agent_inherits_the_models_tools(self) -> None:
         model = MinervaModel(
-            SWIFT, OllamaEngine(host="http://127.0.0.1:11434"), tools=default_registry()
+            CAPABLE_SPEC, OllamaEngine(host="http://127.0.0.1:11434"), tools=default_registry()
         )
         assert Agent(model).tools is default_registry()
