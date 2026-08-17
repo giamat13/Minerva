@@ -29,6 +29,7 @@ from ..errors import ModelNotFoundError
 from ..tools.registry import ToolRegistry, default_registry
 from .base import MinervaModel, ModelSpec
 from .swift import SWIFT
+from .swift_instruct import SWIFT_INSTRUCT
 
 __all__ = [
     "get_spec",
@@ -43,15 +44,18 @@ __all__ = [
 # Ordered smallest to largest. Add new models here.
 _SPECS: dict[str, ModelSpec] = {
     SWIFT.name: SWIFT,
+    SWIFT_INSTRUCT.name: SWIFT_INSTRUCT,
     # Future models go here, e.g.:
-    #   FALCON.name: FALCON,   # medium tier
-    #   OWL.name: OWL,         # large tier - Minerva's own bird
+    #   KESTREL.name: KESTREL,   # medium tier
+    #   OWL.name: OWL,           # large tier - Minerva's own bird
 }
 
 # Alternative names users may type. Keep this small and obvious.
 _ALIASES: dict[str, str] = {
     "minerva-swift": "swift",
     "small": "swift",
+    "swift-chat": "swift-instruct",
+    "instruct": "swift-instruct",
 }
 
 

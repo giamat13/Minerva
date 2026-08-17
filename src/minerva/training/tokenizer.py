@@ -331,6 +331,47 @@ class BPETokenizer:
         payload = b"".join(self.vocab.get(i, b"") for i in ids)
         return payload.decode("utf-8", errors="replace")
 
+    # -- extending -------------------------------------------------------
+
+    def add_special_tokens(self, tokens: Iterable[str]) -> list[int]:
+        """Append new single-token markers to the vocabulary.
+
+        Used to give a fine-tune its chat markers. Each becomes **one** token
+        rather than the five to seven a byte-level BPE would otherwise spend on
+        ``"<|assistant|>"`` - which matters a great deal in a 512-token context,
+        and makes the format far easier for a small model to learn.
+
+        Existing ids are never renumbered, so a model trained against the old
+        vocabulary stays valid; it only needs its embedding matrix extended by
+        the number of ids returned here (see
+        :meth:`minerva.training.model.SwiftLM.resize_token_embeddings`).
+
+        Returns the ids assigned, in order. Already-known tokens keep their id.
+        """
+        assigned: list[int] = []
+        next_id = max(self.vocab) + 1
+        for token in tokens:
+            payload = token.encode("utf-8")
+            existing = self._token_to_id.get(payload)
+            if existing is not None:
+                assigned.append(existing)
+                continue
+
+            self.vocab[next_id] = payload
+            self._token_to_id[payload] = next_id
+            self._special_ids[token] = next_id
+            self.special_tokens = (*self.special_tokens, token)
+            assigned.append(next_id)
+            next_id += 1
+
+        # Longest-first, so "<|/think|>" is never matched as "<|" + ...
+        ordered = sorted(self.special_tokens, key=len, reverse=True)
+        self._special_pattern = re.compile(
+            "(" + "|".join(re.escape(t) for t in ordered) + ")"
+        )
+        self._cache.clear()
+        return assigned
+
     # -- persistence -----------------------------------------------------
 
     def save(self, path: str | Path) -> Path:

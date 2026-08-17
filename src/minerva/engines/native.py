@@ -62,14 +62,14 @@ class NativeEngine(Engine):
     """Runs a Minerva checkpoint in-process with PyTorch."""
 
     name = "minerva"
+    # The engine can do all of this; whether a given checkpoint can is a
+    # property of that model's spec (supports_tools / supports_thinking), which
+    # is where the honest answer for Swift-the-base-model lives.
     capabilities = EngineCapabilities(
         streaming=True,
-        # Both of these are false because Swift is a base model, not because
-        # the engine cannot express them. When a Minerva model is trained for
-        # tool use, this changes with the model, not with the plumbing.
-        tools=False,
-        thinking=False,
-        thinking_trace=False,
+        tools=True,
+        thinking=True,
+        thinking_trace=True,
         thinking_budget=False,
         vision=False,
     )
@@ -97,6 +97,7 @@ class NativeEngine(Engine):
         # Loaded lazily and cached per model, so constructing an engine costs
         # nothing and importing minerva never imports torch.
         self._loaded: dict[str, tuple[Any, Any]] = {}
+        self._chat_format: dict[str, bool] = {}
 
     # -- lazy torch ------------------------------------------------------
 
@@ -147,6 +148,11 @@ class NativeEngine(Engine):
             + ", ".join(str(c) for c in candidates)
         )
 
+    def uses_chat_format(self, model: str) -> bool:
+        """True when this checkpoint was instruction-tuned onto the chat format."""
+        self.load(model)
+        return self._chat_format.get(model, False)
+
     def load(self, model: str) -> tuple[Any, Any]:
         """Load (and cache) the model and tokenizer for ``model``."""
         if model in self._loaded:
@@ -173,6 +179,10 @@ class NativeEngine(Engine):
                 f"tokenizer vocabulary ({tokenizer.vocab_size}) does not match the "
                 f"checkpoint ({config.vocab_size}); they are from different runs"
             )
+
+        # Written by the fine-tuner. A base checkpoint has no chat markers, so
+        # prompting it with them would put it badly off-distribution.
+        self._chat_format[model] = bool(payload.get("chat_format", False))
 
         self._loaded[model] = (network, tokenizer)
         return network, tokenizer
@@ -230,82 +240,216 @@ class NativeEngine(Engine):
         return final
 
     def stream(self, request: GenerationRequest) -> Iterator[StreamChunk]:
-        """Continue the prompt, yielding text as it is generated."""
+        """Generate, in whichever format the checkpoint was trained for."""
+        if self.uses_chat_format(request.model):
+            yield from self._stream_chat(request)
+        else:
+            yield from self._stream_continuation(request)
+
+    # -- base models: raw text continuation -------------------------------
+
+    def _stream_continuation(self, request: GenerationRequest) -> Iterator[StreamChunk]:
+        """Continue the prompt as plain text. For pretrained-only checkpoints."""
         if request.tools:
             raise CapabilityError(
-                "Swift is a base language model and was never trained to call tools. "
-                "Run without tools, or use an engine serving a tool-trained model."
+                f"{request.model!r} is a base language model and was never trained "
+                f"to call tools. Run without tools, or use an instruction-tuned "
+                f"Minerva model such as 'swift-instruct'."
             )
 
         torch = self._torch()
         network, tokenizer = self.load(request.model)
 
         prompt = flatten_messages(request.messages)
-        prompt_ids = tokenizer.encode(prompt)
-        if not prompt_ids:
-            prompt_ids = [tokenizer.eot_id]
-
-        sampling = request.sampling
-        max_new = sampling.max_tokens or 128
-        # Leave room for the answer: a base model with a full context window
-        # has nowhere to put its continuation.
-        budget = network.config.max_seq_len - max_new - 1
-        if budget < 1:
-            raise EngineRequestError(
-                f"max_tokens {max_new} leaves no room in a "
-                f"{network.config.max_seq_len}-token context"
-            )
-        prompt_ids = prompt_ids[-budget:]
+        prompt_ids = self._fit_prompt(
+            tokenizer.encode(prompt) or [tokenizer.eot_id], network, request
+        )
 
         idx = torch.tensor([prompt_ids], dtype=torch.long, device=self._device())
         started = time.monotonic()
         pieces: list[int] = []
-
-        # Bytes are emitted as they arrive, but a multi-byte character may
-        # straddle two tokens, so text is flushed only when it decodes cleanly.
         pending: list[int] = []
-        for token in network.generate_stream(
-            idx,
-            max_new,
-            temperature=1.0 if sampling.temperature is None else sampling.temperature,
-            top_k=sampling.top_k,
-            top_p=sampling.top_p,
-            repetition_penalty=sampling.repeat_penalty or 1.0,
-            eos_id=tokenizer.eot_id,
-            seed=sampling.seed,
-        ):
+
+        for token in self._sample(network, tokenizer, idx, request):
             token_id = int(token.item())
             pieces.append(token_id)
-
-            # The document separator is a control token telling us to stop.
-            # Decoding it would print a literal "<|endoftext|>" to the user.
             if token_id == tokenizer.eot_id:
                 continue
-
             pending.append(token_id)
             text = tokenizer.decode(pending)
-            if "�" in text:
-                continue  # incomplete UTF-8; wait for the next token
+            if "\ufffd" in text:
+                continue
             pending = []
             yield StreamChunk(kind="content", text=text)
 
         if pending:
             yield StreamChunk(kind="content", text=tokenizer.decode(pending))
 
-        completion = tokenizer.decode([t for t in pieces if t != tokenizer.eot_id])
-        message = Message(role=Role.ASSISTANT, content=completion)
-        result = GenerationResult(
+        message = Message(
+            role=Role.ASSISTANT,
+            content=tokenizer.decode([t for t in pieces if t != tokenizer.eot_id]),
+        )
+        yield StreamChunk(
+            kind="done",
+            result=self._result(
+                message,
+                request,
+                prompt_ids,
+                pieces,
+                started,
+                stopped=bool(pieces) and pieces[-1] == tokenizer.eot_id,
+            ),
+        )
+
+    # -- instruction-tuned models: the chat format ------------------------
+
+    def _stream_chat(self, request: GenerationRequest) -> Iterator[StreamChunk]:
+        """Generate one conversational turn.
+
+        Generation stops at ``<|/call|>`` as well as ``<|end|>``. That is not an
+        optimisation: if the model ran past the close of a tool call it would
+        write the tool's output itself, and the agent loop would feed an
+        invented result back as if a real tool had produced it. Stopping there
+        is what makes the tool call real.
+        """
+        torch = self._torch()
+        from ..training import chat as chat_format
+
+        network, tokenizer = self.load(request.model)
+
+        # A thinking level above DO opens the reasoning block in the prompt, so
+        # the model must reason before answering rather than being asked nicely.
+        wants_thinking = bool(request.thinking and request.thinking.enabled)
+        prompt = chat_format.format_conversation(
+            list(request.messages), add_generation_prompt=True, thinking=wants_thinking
+        )
+        prompt_ids = self._fit_prompt(tokenizer.encode(prompt), network, request)
+
+        specials = tokenizer._special_ids
+        stop_ids = frozenset(
+            {
+                specials[chat_format.END],
+                specials[chat_format.CALL_CLOSE],
+                tokenizer.eot_id,
+            }
+        )
+
+        idx = torch.tensor([prompt_ids], dtype=torch.long, device=self._device())
+        started = time.monotonic()
+        pieces: list[int] = []
+
+        for token in self._sample(network, tokenizer, idx, request, stop_ids=stop_ids):
+            pieces.append(int(token.item()))
+
+        generated = tokenizer.decode(pieces)
+        parsed = chat_format.parse_response(generated, thinking_started=wants_thinking)
+
+        # A 9.9M model sometimes ends its turn without ever leaving the
+        # reasoning block, producing thought and no answer. Rather than hand
+        # back an empty reply, close the block for it and let it continue from
+        # its own reasoning. One retry only - if it will not answer twice, that
+        # is the honest result and it is reported as an empty answer.
+        if wants_thinking and parsed.thinking and not parsed.content and not parsed.tool_calls:
+            continued = prompt + parsed.thinking + chat_format.THINK_CLOSE
+            resume_ids = self._fit_prompt(tokenizer.encode(continued), network, request)
+            resume = torch.tensor([resume_ids], dtype=torch.long, device=self._device())
+            extra = [
+                int(t.item())
+                for t in self._sample(network, tokenizer, resume, request, stop_ids=stop_ids)
+            ]
+            pieces.extend(extra)
+            second = chat_format.parse_response(tokenizer.decode(extra))
+            parsed = chat_format.ParsedResponse(
+                content=second.content,
+                thinking=parsed.thinking,
+                tool_calls=second.tool_calls,
+            )
+
+        if parsed.thinking:
+            yield StreamChunk(kind="thinking", text=parsed.thinking)
+        for call in parsed.tool_calls:
+            yield StreamChunk(kind="tool_call", tool_call=call)
+        if parsed.content:
+            yield StreamChunk(kind="content", text=parsed.content)
+
+        message = parsed.to_message()
+        yield StreamChunk(
+            kind="done",
+            result=self._result(
+                message,
+                request,
+                prompt_ids,
+                pieces,
+                started,
+                stopped=bool(pieces) and pieces[-1] in stop_ids,
+            ),
+        )
+
+    # -- shared plumbing ---------------------------------------------------
+
+    def _fit_prompt(self, prompt_ids: list[int], network: Any, request: Any) -> list[int]:
+        """Trim the prompt so there is room to answer inside the context."""
+        max_new = request.sampling.max_tokens or 128
+        budget = network.config.max_seq_len - max_new - 1
+        if budget < 1:
+            raise EngineRequestError(
+                f"max_tokens {max_new} leaves no room in a "
+                f"{network.config.max_seq_len}-token context"
+            )
+        return (prompt_ids or [0])[-budget:]
+
+    def _sample(
+        self,
+        network: Any,
+        tokenizer: Any,
+        idx: Any,
+        request: GenerationRequest,
+        *,
+        stop_ids: frozenset[int] | None = None,
+    ) -> Iterator[Any]:
+        sampling = request.sampling
+        return network.generate_stream(
+            idx,
+            sampling.max_tokens or 128,
+            temperature=1.0 if sampling.temperature is None else sampling.temperature,
+            top_k=sampling.top_k,
+            top_p=sampling.top_p,
+            repetition_penalty=sampling.repeat_penalty or 1.0,
+            eos_id=tokenizer.eot_id,
+            stop_ids=stop_ids,
+            seed=sampling.seed,
+        )
+
+    def _result(
+        self,
+        message: Message,
+        request: GenerationRequest,
+        prompt_ids: list[int],
+        pieces: list[int],
+        started: float,
+        *,
+        stopped: bool,
+    ) -> GenerationResult:
+        """Assemble the result.
+
+        ``stopped`` says whether generation ended on a stop token rather than
+        by exhausting the token budget - the caller knows, because the stop set
+        differs between a base continuation and a chat turn.
+        """
+        finished = "stop" if stopped else "length"
+        if message.tool_calls:
+            finished = "tool_calls"
+        return GenerationResult(
             message=message,
             model=request.model,
-            finish_reason="stop" if tokenizer.eot_id in pieces else "length",
+            finish_reason=finished,
             usage=Usage(prompt_tokens=len(prompt_ids), completion_tokens=len(pieces)),
             duration_seconds=time.monotonic() - started,
-            raw={"prompt": prompt},
         )
-        yield StreamChunk(kind="done", result=result)
 
     def close(self) -> None:
         self._loaded.clear()
+        self._chat_format.clear()
 
 
 def flatten_messages(messages: Sequence[Message]) -> str:

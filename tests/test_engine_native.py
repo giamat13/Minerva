@@ -245,14 +245,23 @@ class TestGeneration:
 
 
 class TestHonestCapabilities:
-    """Swift is a base model, and the engine must say so rather than pretend."""
+    """The engine can do tools; a base CHECKPOINT cannot, and it says so."""
 
-    def test_it_declares_no_tool_support(self, engine: NativeEngine) -> None:
-        assert engine.capabilities.tools is False
-        assert engine.capabilities.thinking is False
+    def test_the_engine_itself_supports_tools_and_thinking(
+        self, engine: NativeEngine
+    ) -> None:
+        # The engine gained these when swift-instruct was trained. Whether a
+        # given model can use them lives on its ModelSpec, not here.
+        assert engine.capabilities.tools is True
+        assert engine.capabilities.thinking is True
         assert engine.capabilities.streaming is True
 
-    def test_asking_for_tools_raises_instead_of_silently_ignoring_them(
+    def test_a_base_checkpoint_is_not_in_chat_format(self, engine: NativeEngine) -> None:
+        # The fixture checkpoint was pretrained only, so it must be driven as a
+        # text continuation rather than prompted with chat markers.
+        assert engine.uses_chat_format("tiny") is False
+
+    def test_asking_a_base_model_for_tools_raises_rather_than_ignoring_them(
         self, engine: NativeEngine
     ) -> None:
         request = GenerationRequest(
@@ -261,7 +270,7 @@ class TestHonestCapabilities:
             tools=list(default_registry().specs()),
             sampling=SamplingParams(max_tokens=8),
         )
-        with pytest.raises(CapabilityError, match="never trained to call tools"):
+        with pytest.raises(CapabilityError, match="never trained"):
             list(engine.stream(request))
 
 

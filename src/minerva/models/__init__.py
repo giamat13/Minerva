@@ -13,9 +13,11 @@ from __future__ import annotations
 from .base import MinervaModel, ModelSpec
 from .registry import get_spec, list_specs, load_model, model_names, register_spec
 from .swift import SWIFT
+from .swift_instruct import SWIFT_INSTRUCT
 
 __all__ = [
     "SWIFT",
+    "SWIFT_INSTRUCT",
     "MinervaModel",
     "ModelSpec",
     "get_spec",

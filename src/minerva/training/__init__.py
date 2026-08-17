@@ -41,13 +41,20 @@ __all__ = [
     "Trainer",
     "build_corpus",
     "evaluate_checkpoint",
+    "evaluate_instruct",
+    "finetune",
+    "format_conversation",
+    "parse_response",
     "train_bpe",
 ]
 
 if TYPE_CHECKING:  # pragma: no cover - import-time typing only
+    from .chat import format_conversation, parse_response
     from .data import SOURCES, build_corpus
     from .dataset import TokenDataset
     from .evaluate import evaluate_checkpoint
+    from .finetune import finetune
+    from .instruct_eval import evaluate_instruct
     from .model import SWIFT_CONFIG, SwiftConfig, SwiftLM
     from .tokenizer import BPETokenizer, train_bpe
     from .trainer import TrainConfig, Trainer
@@ -68,6 +75,10 @@ _LAZY: dict[str, str] = {
     "TrainConfig": ".trainer",
     "Trainer": ".trainer",
     "evaluate_checkpoint": ".evaluate",
+    "evaluate_instruct": ".instruct_eval",
+    "finetune": ".finetune",
+    "format_conversation": ".chat",
+    "parse_response": ".chat",
 }
 
 

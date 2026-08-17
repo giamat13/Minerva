@@ -470,6 +470,9 @@ class OllamaEngine(Engine):
             parsed = json.loads(detail)
             detail = parsed.get("error", detail) if isinstance(parsed, dict) else detail
         except ValueError:
+            # Not JSON - keep the raw body as the detail. Nothing is being
+            # silenced here: an error is raised either way, this only chooses
+            # the most readable message for it.
             pass
         raise EngineRequestError(
             f"ollama returned HTTP {response.status_code}: {detail[:400] or '(empty body)'}",

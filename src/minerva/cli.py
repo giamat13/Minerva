@@ -4,9 +4,13 @@
     minerva models                      list the model catalogue
     minerva tools                       list registered tools
     minerva thinking                    show the solfege thinking scale
-    minerva pull [MODEL]                install a model's weights on the engine
-    minerva ask "..." [-t sol]          one question, one answer
-    minerva chat [-t sol]               interactive conversation
+    minerva prepare-data                build the corpus and tokenizer
+    minerva train                       pretrain a model from scratch
+    minerva finetune                    instruction-tune it onto the chat format
+    minerva evaluate                    measure a base checkpoint
+    minerva evaluate-instruct           measure an instruction-tuned model
+    minerva ask "..." [-t mi]           one question, one answer
+    minerva chat [-t mi]                interactive conversation
 
 Built on :mod:`argparse` so it has no dependencies beyond the stdlib.
 """
@@ -325,6 +329,34 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     return evaluate_main(forwarded)
 
 
+def cmd_finetune(args: argparse.Namespace) -> int:
+    """Instruction-tune a base checkpoint into a conversational model."""
+    from .training.finetune import main as finetune_main
+
+    forwarded = ["--base", str(args.base), "--out", str(args.out)]
+    if args.tokenizer:
+        forwarded += ["--tokenizer", str(args.tokenizer)]
+    if args.epochs is not None:
+        forwarded += ["--epochs", str(args.epochs)]
+    if args.threads is not None:
+        forwarded += ["--threads", str(args.threads)]
+    return finetune_main(forwarded)
+
+
+def cmd_evaluate_instruct(args: argparse.Namespace) -> int:
+    """Measure an instruction-tuned model on held-out conversations."""
+    from .training.instruct_eval import main as eval_main
+
+    forwarded = ["--model", args.model]
+    if args.json:
+        forwarded += ["--json", str(args.json)]
+    if args.thinking:
+        forwarded += ["--thinking", args.thinking]
+    if args.quiet:
+        forwarded.append("--quiet")
+    return eval_main(forwarded)
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     """Ask one question."""
     config = _config_from_args(args)
@@ -545,6 +577,27 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--max-batches", type=int, default=None)
     evaluate.add_argument("--json", type=Path, default=None)
     evaluate.set_defaults(func=cmd_evaluate)
+
+    finetune = sub.add_parser(
+        "finetune", parents=[common], help="instruction-tune a trained model"
+    )
+    finetune.add_argument("--base", type=Path, default=Path("checkpoints/swift/best.pt"))
+    finetune.add_argument("--tokenizer", type=Path, default=Path("data/tokenizer.json"))
+    finetune.add_argument("--out", type=Path, default=Path("checkpoints/swift-instruct"))
+    finetune.add_argument("--epochs", type=int, default=None)
+    finetune.add_argument("--threads", type=int, default=None)
+    finetune.set_defaults(func=cmd_finetune)
+
+    eval_instruct = sub.add_parser(
+        "evaluate-instruct",
+        parents=[common],
+        help="measure an instruction-tuned model on held-out conversations",
+    )
+    eval_instruct.add_argument("--model", default="swift-instruct")
+    eval_instruct.add_argument("--thinking", default=None)
+    eval_instruct.add_argument("--json", type=Path, default=None)
+    eval_instruct.add_argument("--quiet", action="store_true")
+    eval_instruct.set_defaults(func=cmd_evaluate_instruct)
 
     ask = sub.add_parser("ask", parents=[common, generation], help="continue a prompt")
     ask.add_argument("prompt", help="the question")

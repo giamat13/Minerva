@@ -287,7 +287,129 @@ should not be described as one.
 
 ---
 
-## 8. Scaling up
+## 8. Stage two: instruction tuning
+
+`training/finetune.py`, `training/chat.py`, `training/instruct_data.py`
+
+Pretraining taught Swift English. It did not teach it a conversation, and a
+base model asked "What is 17 times 43?" writes more questions. Stage two fixes
+that, producing a **second model in the catalogue**, `swift-instruct`, while
+the base model stays exactly as it was.
+
+```bash
+minerva finetune                    # ~2 minutes on 4 CPU cores
+minerva evaluate-instruct           # measure it on held-out conversations
+```
+
+### The chat format
+
+Nine markers, each added to the tokenizer as a **single token** and the
+embedding matrix extended to match (pretrained rows copied across untouched):
+
+```
+<|user|>What is 17 times 43?<|assistant|><|call|>calculate {"expression": "17 * 43"}<|/call|><|result|>731<|/result|><|assistant|>17 times 43 is 731.<|end|>
+```
+
+A byte-level BPE would otherwise spend 5-7 tokens on `<|assistant|>` — 
+unaffordable in a 512-token context. One module defines the format, and the
+training data, the engine's prompt and the parser all use it, so they cannot
+drift apart.
+
+**Generation stops at `<|/call|>`.** That is not an optimisation: if the model
+ran past it, it would write the tool's output itself and the agent loop would
+feed an invented result back as though a tool had produced it.
+
+### The data
+
+**185 conversations, every one written by hand.** No script, no templates, no
+permuted slot values — `CLAUDE.md` forbids all three, and this is where that
+rule bites hardest.
+
+**Tool results are never fabricated**: an example declares the *call*, and the
+build executes the real tool to get the result that goes into the text. Only
+the clock examples are pinned, because their output depends on the wall clock.
+
+Loss is **masked to the assistant's own tokens** (59% of them). The model is
+not trained to predict the user's questions or the tool's output.
+
+### Choosing the checkpoint by the right metric
+
+Validation loss selected the wrong model. Loss is dominated by the dozens of
+content tokens in each answer, while the decision that matters — call a tool,
+think first, or answer directly — is a **single token** after `<|assistant|>`.
+The first run reached 0.14 training loss while getting that one token wrong on
+every arithmetic question.
+
+So the trainer measures **routing accuracy** directly and selects on it.
+
+### Three rounds, including the one that went backwards
+
+| set | routing | tool name | arguments | answer | refusal |
+|---|---|---|---|---|---|
+| 123 examples | 91.2% | 88.9% | 11.1% | 6.2% | 50.0% |
+| 157 (+34 arithmetic) | 85.3% | 83.3% | **27.8%** | **25.0%** | 16.7% |
+| 185 (rebalanced) | **94.1%** | 88.9% | 27.8% | 31.2% | **66.7%** |
+
+The middle row is the interesting one. Adding 34 arithmetic examples more than
+doubled argument accuracy — and dropped honest refusal from 50% to 17%,
+because the set had tipped to 91 tool examples against 66 without and the model
+learned "reach for the calculator". That is the exact failure the dataset's own
+docstring warns about, and it appeared within one run. Round three restored the
+balance and kept most of the gain.
+
+### What Swift-Instruct actually does
+
+Measured with greedy decoding on 34 **held-out** hand-written prompts, none of
+which appears in training (`minerva evaluate-instruct`):
+
+| | |
+|---|---|
+| format valid | **100.0%** |
+| routing accuracy | **94.1%** |
+| tool name accuracy | **88.9%** |
+| argument accuracy | **27.8%** |
+| final answer correct | **31.2%** |
+| honest refusal | **66.7%** |
+
+It reliably decides **whether** to use a tool and **which** one. It is poor at
+**arguments** — it copies the first operand and often fumbles the second.
+Routing is a one-token decision learnable from 185 examples; copying arbitrary
+operands is a general skill that needs far more data than a hand-written set
+can carry.
+
+The evaluation uses greedy decoding deliberately: with sampling, the same
+checkpoint scored 94.4% and 83.3% tool accuracy on two seeds, and a number that
+swings eleven points with the random seed cannot support a claim.
+
+### Thinking was trained, measured, and switched off
+
+The scale is fully wired for this model: above `DO` the engine opens
+`<|think|>` in the prompt, the model produces a trace, the parser reads it
+back, and there is a recovery path for a turn that never leaves the block. 29
+of the training conversations contain reasoning.
+
+It makes the model **worse**:
+
+| | thinking off (`do`) | thinking on (`mi`) |
+|---|---|---|
+| routing accuracy | 94.1% | 61.8% |
+| tool name accuracy | 88.9% | 33.3% |
+| argument accuracy | 27.8% | 0.0% |
+| final answer correct | 31.2% | 0.0% |
+| honest refusal | 66.7% | 33.3% |
+
+Forcing a 9.9M model to reason first does not buy deliberation; it buys ~30
+more tokens of drift, and then the answer is built on the drift. So
+`swift-instruct` ships `max_thinking=DO`. The machinery is real and tested;
+the weights are not good enough to use it, and `CLAUDE.md` forbids advertising
+a capability the weights do not have.
+
+Raising it is a training problem — more and better reasoning traces, on a
+larger model. The line to change is in `models/swift_instruct.py`.
+
+---
+
+## 9. Scaling up
 
 Nothing in the pipeline is hardcoded to Swift's size.
 

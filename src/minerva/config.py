@@ -64,7 +64,7 @@ class MinervaConfig:
     """How long the engine keeps the model resident, e.g. ``"5m"``, ``"0"``."""
 
     # -- defaults for a session -----------------------------------------
-    default_model: str = "swift"
+    default_model: str = "swift-instruct"
     """Minerva model name used when none is given (``MINERVA_DEFAULT_MODEL``)."""
 
     thinking_level: ThinkingLevel = ThinkingLevel.FA

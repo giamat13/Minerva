@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import cast
 
 import torch
@@ -289,6 +289,48 @@ class SwiftLM(nn.Module):
             total -= self.embed.weight.numel()
         return total
 
+    # -- extending -------------------------------------------------------
+
+    def resize_token_embeddings(self, new_vocab_size: int) -> None:
+        """Grow the vocabulary, keeping every existing token's embedding.
+
+        Fine-tuning adds chat markers to the tokenizer, so the model needs rows
+        for them. The learned rows are copied across unchanged and only the new
+        ones are initialised, which is what keeps a fine-tune a continuation of
+        pretraining rather than a restart.
+
+        New rows are initialised small rather than at the usual 0.02: an
+        untrained row that starts as large as a trained one produces wild logits
+        for the new tokens on the very first step.
+        """
+        old_size = self.config.vocab_size
+        if new_vocab_size == old_size:
+            return
+        if new_vocab_size < old_size:
+            raise ValueError(
+                f"refusing to shrink the vocabulary from {old_size} to {new_vocab_size}; "
+                f"that would discard learned embeddings"
+            )
+
+        embedding = nn.Embedding(new_vocab_size, self.config.d_model)
+        nn.init.normal_(embedding.weight, mean=0.0, std=0.002)
+        with torch.no_grad():
+            embedding.weight[:old_size] = self.embed.weight
+        self.embed = embedding
+
+        if self.config.tie_embeddings:
+            self.lm_head = nn.Linear(self.config.d_model, new_vocab_size, bias=False)
+            self.lm_head.weight = self.embed.weight
+        else:
+            head = nn.Linear(self.config.d_model, new_vocab_size, bias=False)
+            nn.init.normal_(head.weight, mean=0.0, std=0.002)
+            with torch.no_grad():
+                head.weight[:old_size] = self.lm_head.weight
+            self.lm_head = head
+
+        # The config is frozen, so replace it rather than mutating it.
+        object.__setattr__(self, "config", replace(self.config, vocab_size=new_vocab_size))
+
     # -- forward ---------------------------------------------------------
 
     def forward(
@@ -352,13 +394,23 @@ class SwiftLM(nn.Module):
         top_p: float | None = 0.95,
         repetition_penalty: float = 1.0,
         eos_id: int | None = None,
+        stop_ids: frozenset[int] | None = None,
         seed: int | None = None,
     ) -> Iterator[torch.Tensor]:
         """Sample a continuation, yielding one ``(batch, 1)`` token at a time.
 
         Uses a KV cache, so generation is linear in length rather than
         quadratic. This is the streaming core; :meth:`generate` collects it.
+
+        ``stop_ids`` halts generation on any of several tokens, which is what a
+        tool-calling turn needs: the model must stop at the close of a tool
+        call so the tool can actually run, and only then continue with the real
+        result appended. Generating past it would make the model invent the
+        tool's output - the exact failure this project refuses to ship.
         """
+        stops = set(stop_ids or ())
+        if eos_id is not None:
+            stops.add(eos_id)
         self.eval()
         generator = None
         if seed is not None:
@@ -388,7 +440,7 @@ class SwiftLM(nn.Module):
             yield next_token
             produced = torch.cat([produced, next_token], dim=1)
 
-            if eos_id is not None and bool((next_token == eos_id).all()):
+            if stops and int(next_token[0, 0]) in stops:
                 return
             if offset + 1 >= self.config.max_seq_len:
                 return

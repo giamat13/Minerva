@@ -56,8 +56,9 @@ The whole pipeline is in this repository and reproducible in three commands.
 
 ```bash
 minerva prepare-data     # real corpus -> BPE tokenizer -> token bins
-minerva train            # pretrain from scratch
-minerva ask "The"        # run the weights you just trained
+minerva train            # stage 1: pretrain from scratch      (155 min, CPU)
+minerva finetune         # stage 2: teach it to hold a chat    (2 min, CPU)
+minerva ask "What is 17 times 43?"
 ```
 
 **1. The corpus** — ~27 MB of real, human-written English prose across six
@@ -127,10 +128,61 @@ coherence is not.
 
 ---
 
+## Stage two: Swift-Instruct
+
+The base model continues text; it does not answer questions. So there is a
+second stage, and a second model in the catalogue.
+
+`minerva finetune` trains `swift` on **185 hand-written conversations** onto a
+chat format with nine single-token markers. No script, no templates, no
+permuted slot values. Tool results in the training data are never invented: an
+example declares the *call*, and the build runs the real tool to get the result.
+
+**It genuinely calls tools.** The model decides, the real tool executes, the
+result is fed back:
+
+```
+Q: What is 17 times 43?
+   -> model asked for: calculate({"expression": "17 * 43"})
+   <- real tool returned: '731'
+A: '17 times 43 is 731.'
+
+Q: Who won the World Cup in 2022?
+A: 'I do not know. I am a small model and I was not trained on recent events.'
+```
+
+Measured on 34 **held-out** hand-written prompts, greedy decoding
+(`minerva evaluate-instruct`):
+
+| | measured |
+|---|---|
+| format valid | **100.0%** |
+| routing accuracy (call a tool or not) | **94.1%** |
+| tool name accuracy | **88.9%** |
+| **argument accuracy** | **27.8%** |
+| final answer correct | **31.2%** |
+| honest refusal | **66.7%** |
+
+It reliably decides **whether** and **which**. It is bad at **arguments** — 
+asked for `23 times 19` it will call `23 * 13`. Routing is a one-token decision
+learnable from 185 examples; copying an arbitrary second operand is a general
+skill that needs far more data. That limitation is in the model's spec, in the
+docs, and in `examples/04_tools_and_thinking.py`, which prints a failure next
+to every success.
+
+**Thinking was trained, measured, and switched off.** The scale is fully wired
+for this model — the engine opens `<|think|>`, the model produces a trace, the
+parser reads it back — and 29 training conversations contain reasoning. It
+makes the model *worse*: routing falls 94.1% → 61.8%, tool accuracy 88.9% →
+33.3%, arguments 27.8% → 0%. So `swift-instruct` ships `max_thinking=do`.
+Forcing a 9.9M model to reason first buys drift, not deliberation.
+
+---
+
 ## What Swift is, and what it is not
 
-**Swift is a base language model.** It was pretrained to predict the next token
-and has had no instruction tuning, no chat tuning and no RLHF. So:
+**`swift` is a base language model.** It was pretrained to predict the next
+token and has had no instruction tuning, no chat tuning and no RLHF. So:
 
 * It **continues text**. Give it `"The company said it expects"` and it writes
   plausible Reuters copy. Give it `"What is the capital of France?"` and it
@@ -180,9 +232,11 @@ three encodings (on/off, coarse effort, token budget) and each engine picks the
 one it speaks. Each model declares its own ceiling, and requests above it are
 **clamped, never rejected**.
 
-Swift's ceiling is `do`, because Swift cannot reason — so the scale currently
-degrades to silence for it. That is the honest state today; the scale is
-platform machinery waiting for a model trained to use it.
+Both Minerva models ceiling at `do`, and that is a **measurement**. Swift is a
+base model with no reasoning phase at all. Swift-Instruct *was* trained with
+reasoning traces and the whole path works — but it measurably degrades the
+answers, so the ceiling stays at `do`. The scale is real, tested machinery
+waiting for a model that benefits from it.
 
 ---
 
@@ -253,9 +307,11 @@ Runnable examples are in [`examples/`](examples/).
 | Model | Tier | Params | Trained on | Engine | Tools | Thinking |
 |-------|------|--------|------------|--------|-------|----------|
 | **Swift** | small | 9.9M | 27 MB, from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
+| **Swift-Instruct** | small | 9.9M | + 185 hand-written conversations | `minerva` (in-process) | ✅ 94% routing | ✗ measured to hurt |
 
 Swift v0.1.0: held-out perplexity **31.75**, bits/byte **1.3571**, trained in
-155 minutes on 4 CPU cores.
+155 minutes on 4 CPU cores. Swift-Instruct v0.1.0: **94.1%** routing accuracy,
+**27.8%** argument accuracy on held-out prompts.
 
 More models are coming; the registry is built to take them.
 See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
@@ -271,13 +327,18 @@ src/minerva/
 │   ├── tokenizer.py      Byte-level BPE, implemented and trained here
 │   ├── dataset.py        Memory-mapped token batches
 │   ├── model.py          SwiftLM: RMSNorm, RoPE, SwiGLU, GQA, tied embeddings
-│   └── trainer.py        AdamW, cosine schedule, checkpointing, resume
+│   ├── trainer.py        Stage 1: pretraining from scratch
+│   ├── chat.py           The chat format - one definition, used by all three
+│   ├── instruct_data.py  185 hand-written conversations, real tool results
+│   ├── finetune.py       Stage 2: instruction tuning, assistant-only loss
+│   └── instruct_eval.py  Held-out evaluation of the tuned model
 ├── engines/            WHAT RUNS A MODEL
 │   ├── native.py         Runs OUR checkpoints in-process
 │   ├── ollama.py         Runs third-party weights via a local daemon
 │   └── registry.py       ← add new engines here
 ├── models/             WHAT A MODEL IS
-│   ├── swift.py          Swift's spec — written as the template for the next
+│   ├── swift.py          The base model's spec — the template for the next
+│   ├── swift_instruct.py The chat model's spec
 │   └── registry.py       ← add new models here
 ├── tools/              WHAT A MODEL CAN CALL
 ├── runtime/            The agent loop and multi-turn sessions
@@ -319,6 +380,11 @@ Contributor rules — including the standard for training data — are in
 
 **Minerva** היא חברת מודלי AI. השם על שם האלה הרומית של החוכמה והמלאכה — לא של
 הכוח הגס. זו בדיוק הטענה: מערכת טובה נמדדת בדיוק ובמלאכה, לא בגודל.
+
+**Swift-Instruct** הוא שלב שני: אותו מודל, שאומן על 185 שיחות שנכתבו ביד, ולמד
+פורמט שיחה והפעלת כלים. הוא **באמת מפעיל כלים** — 94.1% דיוק בהחלטה אם להפעיל
+כלי ו-88.9% בבחירת הכלי — אבל רק 27.8% בארגומנטים. חשיבה אומנה, נמדדה, **וכובתה**:
+היא מורידה את דיוק הניתוב מ-94.1% ל-61.8%. כל המספרים בתיעוד.
 
 **Swift** הוא המודל הראשון, על שם הסיס — ציפור של כארבעים גרם שמבלה כמעט את כל
 חייה באוויר ואינה נאלצת לנחות. הוא **אומן מאפס בתוך הפרויקט הזה**: הארכיטקטורה,

@@ -33,7 +33,7 @@ class TestDefaults:
     def test_sensible_out_of_the_box_values(self) -> None:
         config = load_config()
         assert config.engine == "minerva", "Minerva runs its own weights by default"
-        assert config.default_model == "swift"
+        assert config.default_model == "swift-instruct", "the chat model is the default"
         assert config.thinking_level is ThinkingLevel.FA
         assert config.ollama_host.startswith("http")
         assert config.checkpoint_dir == "checkpoints"
