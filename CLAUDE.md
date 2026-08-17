@@ -69,6 +69,36 @@ the same bar:
 
 When you add data, add it that way. When you reject data, write down why.
 
+### Approved sources to draw from
+
+**Hugging Face Datasets — <https://huggingface.co/datasets>** is an approved
+place to look for training and evaluation data, alongside the corpora already
+in `data.py`.
+
+It does not get an exemption from anything above. It makes the rules *harder*
+to follow, because a dataset there is one line of code away from being in your
+training set:
+
+- ❌ **Never `load_dataset(...)` a corpus straight into training.** A dataset
+  being popular, large, or benchmark-standard is not a reason to trust it.
+  Plenty of them are machine-translated, model-generated, deduplicated badly,
+  or lowercased and pre-tokenised like the two corpora this project already
+  rejected.
+- ✅ **Read a real sample first** — a few hundred rows, by eye — and decide
+  whether the text is something Minerva should learn to imitate.
+- ✅ **Check the licence on the dataset card** and record it in `SOURCES`, with
+  the dataset id and revision, exactly as the existing sources do. "It was on
+  Hugging Face" is not a licence.
+- ✅ **Take the subset you can justify**, not the whole thing because it
+  downloads in one call. If you cannot say what a split teaches Swift, leave it
+  out.
+- ✅ **Prefer human-written text.** Many instruction datasets there are
+  model-generated. Using one to *draft* candidates is allowed; shipping it
+  unread is not, and it must be labelled as model-generated in the provenance
+  note.
+- ✅ **Pin the revision.** Datasets are edited in place; an unpinned build is
+  not reproducible.
+
 ---
 
 ## 2. No shortcuts, anywhere
