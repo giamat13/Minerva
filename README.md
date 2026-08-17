@@ -56,27 +56,42 @@ The whole pipeline is in this repository and reproducible in three commands.
 
 ```bash
 minerva prepare-data     # real corpus -> BPE tokenizer -> token bins
-minerva train            # stage 1: pretrain from scratch      (155 min, CPU)
+minerva train            # stage 1: pretrain from scratch      (~99 min, CPU)
 minerva finetune         # stage 2: teach it to hold a chat    (2 min, CPU)
 minerva ask "What is 17 times 43?"
 ```
 
-**1. The corpus** — ~27 MB of real, human-written English prose across six
-sources and four registers: Project Gutenberg literature, Reuters newswire,
-European Parliament debate, US political oratory, and informal web text. Every
-source is downloaded from its original distributor with its licence and origin
-recorded in a generated `manifest.json`. Nothing is templated, generated or
-augmented.
+**1. The corpus** — ~50.8 MB of real, human-written prose across eight sources:
+Project Gutenberg literature, Reuters newswire, European Parliament debate, US
+political oratory, informal web text, Simple English Wikipedia, and — new in
+v0.2.0 — **curated Hebrew literature** from Project Ben-Yehuda. Every source is
+downloaded from its original distributor with its licence and origin recorded
+in a generated `manifest.json`. Nothing is templated, generated or augmented.
 
-Two available corpora were **rejected on quality grounds**: the Brown corpus
+The Hebrew source is Project Ben-Yehuda's public-domain library — the Hebrew
+analogue of Project Gutenberg — curated to seven canonical authors (Bialik,
+Rachel Bluwstein, Brenner, Ahad Ha'am, Mendele Mocher Sforim, Tchernichovsky,
+Frishman) and filtered to their *original*, non-translated work. Both new
+sources were found via [Hugging Face Datasets](https://huggingface.co/datasets),
+reviewed by hand, and pinned to a specific revision, per `CLAUDE.md`'s rules for
+using it as a source. Three other real candidates (a Hebrew web scrape, a
+GPL-3.0 religious-text library, and full English Wikipedia) were reviewed and
+rejected — the reasons are in [`docs/TRAINING.md`](docs/TRAINING.md).
+
+Two more corpora were **rejected on quality grounds**: the Brown corpus
 (distributed POS-tagged) and Pang & Lee's movie reviews (distributed lowercased
-and pre-tokenised). Together they would have added 17 MB. Volume was not a good
-enough reason to teach the model damaged typography.
+and pre-tokenised). Volume was not a good enough reason to teach the model
+damaged typography.
 
 **2. The tokenizer** — a byte-level BPE, implemented here and trained on that
-corpus in 95 seconds. 8,192 tokens, all 256 byte values in the base vocabulary
-(so there is no unknown token), digits always split individually. Measured
-compression: 3.66 characters per token → 7,377,901 training tokens.
+corpus. 8,192 tokens, all 256 byte values in the base vocabulary (so there is
+no unknown token — true for Hebrew as much as English), digits always split
+individually. Measured compression: 2.886 characters/token overall (3.338 for
+the English portion, 2.276 for Hebrew — already a 4.5× improvement over
+unmerged byte-level Hebrew). A vocab increase to 12,000 was measured and
+**rejected**: it bought ~5% better compression for +12.3% more parameters,
+without closing the Hebrew/English compression gap. See
+[`docs/TRAINING.md`](docs/TRAINING.md) for the full comparison.
 
 **3. The architecture** — `SwiftLM`, a decoder-only transformer: pre-norm
 RMSNorm, RoPE, SwiGLU feed-forward, grouped-query-capable attention, tied
@@ -90,36 +105,52 @@ SwiftConfig(vocab_size=8192, n_layer=6, n_head=8, d_model=320, max_seq_len=512)
 **4. The run** — sized from measured hardware, not guessed. The machine does
 430 GFLOPS of fp32 matmul and ~3–4k training tokens/second on 4 CPU cores; at
 `6ND` FLOPs that put the compute-optimal point near 9.9M parameters × 37M
-tokens ≈ 5 epochs. The learning rate came from a real 70-step probe over
-{1,2,3,5}×10⁻³ before committing to the run.
+tokens. The learning rate came from a real 70-step probe over {1,2,3,5}×10⁻³
+before committing to the run. **v0.2.0 kept the same 36.86M-token budget** —
+per `CLAUDE.md`, growing the training time needs a strong measured reason, and
+there wasn't one — so the bigger corpus means 2.1 epochs instead of 5.0,
+strictly closer to compute-optimal at the same parameter count.
 
-**5. The result** — 155 minutes on 4 CPU cores, 36.86M tokens, 5 epochs:
+**5. The result** — 98.9 minutes on 4 CPU cores (faster hardware this run),
+36.86M tokens, 2.1 epochs:
 
-| | measured |
-|---|---|
-| held-out loss | **3.4579** |
-| held-out perplexity | **31.75** (chance = 8,192) |
-| bits per byte | **1.3571** |
+| | v0.1.0 (English only) | v0.2.0 (+ Hebrew) |
+|---|---|---|
+| held-out loss | 3.4579 | **3.8542** |
+| held-out perplexity | 31.75 | **47.19** (chance = 8,192) |
+| bits per byte | 1.3571 | **1.4516** |
 
-The curve fell monotonically from perplexity 126.9 at step 250 to 31.8 at step
-4,500, and **was still falling when the run ended** — Swift is data-limited,
-not compute-limited. More corpus is the highest-value next change.
-
-Full detail, including the sizing arithmetic, the curve, real samples and a bug
-the tests caught, is in [`docs/TRAINING.md`](docs/TRAINING.md).
+The blended number is worse, and that is reported here rather than hidden.
+Scored separately by language, the real story is more specific: English's
+bits/byte rose a real but modest 1.3571 → 1.4678 (fewer epochs, an
+8,192-token vocabulary now shared with a second script), while Hebrew comes in
+at 1.4270 bits/byte — Hebrew's *perplexity* looks much worse (77.32 vs 35.57)
+but that is mostly a token-accounting artifact: Hebrew tokens carry more bytes
+each, so on the fair, tokenizer-agnostic bits-per-byte measure the model is
+doing about as well on Hebrew, its first exposure to the language from 17.3 MB,
+as on English. Full breakdown, including why, in
+[`docs/TRAINING.md`](docs/TRAINING.md#5b-the-run-that-produced-swift-v020--adding-hebrew).
 
 ### What it actually learned
 
 Real, unedited output at temperature 0.8:
 
-> **"The company said it expects"** → *to provide a 5-1/2 pct stock dividend of
-> 10 cts a share. It said it will continue to operate in the New York and Exco
-> Health Commission to pay off the total value of the common shares on the
-> outstanding common stock.*
+> **"The company said it expects"** → *to report net earnings growth from its
+> yearly earnings. It said it expects the year results to show sales and
+> earnings growth in 1987/87. It added that it expects to push on sales of
+> 22 mln dlrs.*
+
+> **"שלום רב"** → *לנו כי אין אנו רשאים לדברים: יודעים אתם, כי גם אלה הם הם
+> חורבים על אחרים, הם באים ואומרים, כי הם אינם נוצרים, כי הם הם עצמם אינם
+> רוצים להניח להם את הלבבות...*
 
 It reproduces Reuters house style down to the abbreviations — `pct`, `cts`,
 `dlrs` — and picked up `(Applause.)` from the State of the Union transcripts.
-Nobody coded those; they are corpus conventions it inferred.
+In Hebrew it produces genuinely grammatical morphology (correct verb
+conjugation, correct ה-/ו-/ל-/ש- prefix attachment) and — without being told
+the rule — learned the corpus's own convention of niqqud on poetry but not
+prose. Nobody coded any of that; it is corpus conventions the model inferred,
+in two languages now instead of one.
 
 It also gets things wrong, and this README will say so: **register conditioning
 is unreliable** — an Austen opening can produce political oratory — and
@@ -151,30 +182,41 @@ Q: Who won the World Cup in 2022?
 A: 'I do not know. I am a small model and I was not trained on recent events.'
 ```
 
-Measured on 34 **held-out** hand-written prompts, greedy decoding
+`swift-instruct` is a fine-tune of `swift`, so v0.2.0's Hebrew pretraining run
+(above) meant retraining it from the new base — on the same, unchanged 185
+examples; **no Hebrew was added to the instruct set**, see
+[`docs/TRAINING.md`](docs/TRAINING.md#v020-the-same-185-examples-retrained-on-the-bilingual-base)
+for why. Measured on 34 **held-out** hand-written prompts, greedy decoding
 (`minerva evaluate-instruct`):
 
-| | measured |
-|---|---|
-| format valid | **100.0%** |
-| routing accuracy (call a tool or not) | **94.1%** |
-| tool name accuracy | **88.9%** |
-| **argument accuracy** | **27.8%** |
-| final answer correct | **31.2%** |
-| honest refusal | **66.7%** |
+| | v0.1.0 base | v0.2.0 base (+ Hebrew) |
+|---|---|---|
+| format valid | 100.0% | 100.0% |
+| routing accuracy (call a tool or not) | 94.1% | **91.2%** |
+| tool name accuracy | 88.9% | **94.4%** |
+| **argument accuracy** | 27.8% | **16.7%** |
+| final answer correct | 31.2% | **18.8%** |
+| honest refusal | 66.7% | **50.0%** |
 
-It reliably decides **whether** and **which**. It is bad at **arguments** — 
-asked for `23 times 19` it will call `23 * 13`. Routing is a one-token decision
-learnable from 185 examples; copying an arbitrary second operand is a general
-skill that needs far more data. That limitation is in the model's spec, in the
-docs, and in `examples/04_tools_and_thinking.py`, which prints a failure next
-to every success.
+Mixed, mostly down — a real, measured downstream cost of teaching the base
+model Hebrew: its English competence itself regressed a real (if modest) 8% in
+bits/byte, and a fine-tune of a slightly weaker base is a slightly weaker
+fine-tune, on the identical training data. It is still bad at **arguments** —
+asked to `Add 314 and 159` it now answers `'1584 is 1385'` (correct answer:
+473) — and worse at it than before. Routing is a one-token decision learnable
+from 185 examples; copying arbitrary operands correctly is a general skill
+that needs far more data than a hand-written set of this size can carry, on
+either language. That limitation is in the model's spec, in the docs, and in
+`examples/04_tools_and_thinking.py`, which prints a failure next to every
+success.
 
 **Thinking was trained, measured, and switched off.** The scale is fully wired
 for this model — the engine opens `<|think|>`, the model produces a trace, the
-parser reads it back — and 29 training conversations contain reasoning. It
-makes the model *worse*: routing falls 94.1% → 61.8%, tool accuracy 88.9% →
-33.3%, arguments 27.8% → 0%. So `swift-instruct` ships `max_thinking=do`.
+parser reads it back — and 29 training conversations contain reasoning. On the
+v0.1.0 base it made the model *worse*: routing falls 94.1% → 61.8%, tool
+accuracy 88.9% → 33.3%, arguments 27.8% → 0% (this comparison was not re-run on
+the v0.2.0 bilingual base — there is no reason to expect it reverses, but it
+has not been measured there). So `swift-instruct` ships `max_thinking=do`.
 Forcing a 9.9M model to reason first buys drift, not deliberation.
 
 ---
@@ -197,9 +239,10 @@ code states them rather than papering over them: `NativeEngine.capabilities`
 reports `tools=False`, and asking for tools raises instead of silently
 returning nothing.
 
-At 9.9M parameters on 27 MB, Swift is the scale of a small research baseline.
-It learns grammar, vocabulary, register and local coherence. **It is not a
-chatbot and this project will not describe it as one.**
+At 9.9M parameters on 50.8 MB, Swift is the scale of a small research
+baseline. It learns grammar, vocabulary, register and local coherence in two
+languages. **It is not a chatbot and this project will not describe it as
+one.**
 
 ---
 
@@ -247,12 +290,18 @@ Python 3.11+.
 ```bash
 git clone https://github.com/giamat13/minerva
 cd minerva
-pip install -e ".[training]"      # torch + numpy, needed to train or run Swift
+pip install -e ".[training]"      # torch + numpy + pyarrow, needed to train or run Swift
 
-minerva prepare-data              # downloads ~28 MB, trains the tokenizer
+minerva prepare-data              # ~450 MB raw downloads, curated down to a 50.8 MB corpus
 minerva train                     # pretrains from scratch
 minerva doctor                    # verify: engine ready, checkpoint present
 ```
+
+That 450 MB isn't the corpus size — two sources (Simple English Wikipedia,
+Project Ben-Yehuda) are distributed as one full dump each, and `data.py`
+downloads the whole dump once, caches it, and curates a much smaller slice out
+of it. See [`docs/TRAINING.md`](docs/TRAINING.md) for exactly what is kept and
+why.
 
 The core platform has exactly **one** runtime dependency (`httpx`). PyTorch is
 an optional extra, so using Minerva against an external engine stays a
@@ -306,12 +355,14 @@ Runnable examples are in [`examples/`](examples/).
 
 | Model | Tier | Params | Trained on | Engine | Tools | Thinking |
 |-------|------|--------|------------|--------|-------|----------|
-| **Swift** | small | 9.9M | 27 MB, from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
-| **Swift-Instruct** | small | 9.9M | + 185 hand-written conversations | `minerva` (in-process) | ✅ 94% routing | ✗ measured to hurt |
+| **Swift** | small | 9.9M | 50.8 MB (English + Hebrew), from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
+| **Swift-Instruct** | small | 9.9M | + 185 hand-written conversations | `minerva` (in-process) | ✅ 91% routing | ✗ measured to hurt |
 
-Swift v0.1.0: held-out perplexity **31.75**, bits/byte **1.3571**, trained in
-155 minutes on 4 CPU cores. Swift-Instruct v0.1.0: **94.1%** routing accuracy,
-**27.8%** argument accuracy on held-out prompts.
+Swift v0.2.0: held-out perplexity **47.19**, bits/byte **1.4516**, trained in
+98.9 minutes on 4 CPU cores. Swift-Instruct v0.2.0: **91.2%** routing accuracy,
+**16.7%** argument accuracy on held-out prompts — both down from v0.1.0
+(English-only), a real, measured cost of adding Hebrew at this size; see
+[`docs/TRAINING.md`](docs/TRAINING.md#5b-the-run-that-produced-swift-v020--adding-hebrew).
 
 More models are coming; the registry is built to take them.
 See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
@@ -382,14 +433,24 @@ Contributor rules — including the standard for training data — are in
 הכוח הגס. זו בדיוק הטענה: מערכת טובה נמדדת בדיוק ובמלאכה, לא בגודל.
 
 **Swift-Instruct** הוא שלב שני: אותו מודל, שאומן על 185 שיחות שנכתבו ביד, ולמד
-פורמט שיחה והפעלת כלים. הוא **באמת מפעיל כלים** — 94.1% דיוק בהחלטה אם להפעיל
-כלי ו-88.9% בבחירת הכלי — אבל רק 27.8% בארגומנטים. חשיבה אומנה, נמדדה, **וכובתה**:
-היא מורידה את דיוק הניתוב מ-94.1% ל-61.8%. כל המספרים בתיעוד.
+פורמט שיחה והפעלת כלים. הוא **באמת מפעיל כלים** — 91.2% דיוק בהחלטה אם להפעיל
+כלי ו-94.4% בבחירת הכלי — אבל רק 16.7% בארגומנטים. חשיבה אומנה, נמדדה, **וכובתה**
+(על הבסיס הישן; לא נמדד מחדש על הבסיס הדו-לשוני). כל המספרים בתיעוד.
 
 **Swift** הוא המודל הראשון, על שם הסיס — ציפור של כארבעים גרם שמבלה כמעט את כל
 חייה באוויר ואינה נאלצת לנחות. הוא **אומן מאפס בתוך הפרויקט הזה**: הארכיטקטורה,
 הטוקנייזר, קורפוס האימון וכל 9,875,520 הפרמטרים נוצרו כאן. לא fine-tune ולא
 עטיפה למשקולות של מישהו אחר.
+
+**v0.2.0 הוסיפה עברית.** הקורפוס גדל מ-27MB ל-50.8MB — נוספו ספרות עברית
+אמיתית מפרויקט בן־יהודה (ביאליק, רחל, ברנר, אחד העם, מנדלי מוכר ספרים,
+טשרניחובסקי, פרישמן, מסוננת ליצירות מקוריות בלבד) וערכי ויקיפדיה אנגלית
+פשוטה. גודל אוצר המילים של הטוקנייזר נמדד — לא נוחש — והוחלט להשאיר על 8,192,
+כי הגדלה ל-12,000 קנתה רק כ-5% שיפור בדחיסה תמורת 12.3% יותר פרמטרים. התוצאה:
+**המודל כותב עברית תקנית מבחינה דקדוקית** — נטיות פועל נכונות, צירופי אותיות
+יחס נכונים — אבל האנגלית נפגעה מדידה קלה (כ-8% ב-bits/byte), כי אותו תקציב
+אימון קבוע עכשיו מחולק בין שתי שפות. המספרים המלאים, כולל הסיבה, בתיעוד — לא
+הוסתר שום מספר שהתקבל גרוע יותר.
 
 **מה Swift כן ומה לא.** הוא מודל בסיס (base model): אומן לחזות את הטוקן הבא
 בלבד, בלי instruction tuning ובלי RLHF. לכן הוא **ממשיך טקסט** ולא עונה על

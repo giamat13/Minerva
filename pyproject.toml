@@ -28,9 +28,15 @@ dependencies = [
 [project.optional-dependencies]
 # Training and running Minerva's own weights. Kept optional so that using the
 # platform against an external engine stays a one-dependency install.
+#
+# pyarrow reads the Parquet files Hugging Face distributes datasets in (e.g.
+# the Wikipedia source in training/data.py) - it is the format's standard
+# library and the one datasets-server/HF's own `datasets` package use
+# internally, not a bespoke choice for one file.
 training = [
     "torch>=2.2",
     "numpy>=1.24",
+    "pyarrow>=15",
 ]
 dev = [
     "pytest>=8.0",
@@ -39,6 +45,7 @@ dev = [
     "mypy>=1.11",
     "torch>=2.2",
     "numpy>=1.24",
+    "pyarrow>=15",
 ]
 
 [project.scripts]
@@ -92,3 +99,8 @@ mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_untyped_defs = true
+
+# pyarrow ships no py.typed marker / stubs of its own.
+[[tool.mypy.overrides]]
+module = "pyarrow.*"
+ignore_missing_imports = true

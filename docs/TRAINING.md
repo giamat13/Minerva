@@ -16,9 +16,9 @@ minerva ask "The"        # run the weights you just trained
 
 `src/minerva/training/data.py`
 
-**~27 MB of real, human-written English prose.** Nothing is generated,
-templated or augmented — `CLAUDE.md` forbids it, and a model trained on
-synthetic filler learns the filler.
+**~50.8 MB of real, human-written prose**, in English and — as of v0.2.0 —
+Hebrew. Nothing is generated, templated or augmented — `CLAUDE.md` forbids it,
+and a model trained on synthetic filler learns the filler.
 
 | Source | Size | Register | Licence |
 |---|---|---|---|
@@ -28,20 +28,62 @@ synthetic filler learns the filler.
 | State of the Union addresses | 2.1 MB | Political oratory | Public domain |
 | NLTK web text | 1.7 MB | Informal, conversational | Freely redistributable |
 | Inaugural addresses | 0.8 MB | Formal oratory | Public domain |
+| Simple English Wikipedia (sampled) | 6.2 MB | Encyclopedic reference prose | CC BY-SA 3.0 + GFDL |
+| **Project Ben-Yehuda (Hebrew, 7 authors)** | **17.3 MB** | Hebrew literature: poetry, prose, drama, essays | Public domain |
 
 The mixture is deliberate. A model trained only on 19th-century novels writes
 only 19th-century novels; the newswire and web text are what give Swift any
-contemporary register at all.
+contemporary register at all, and Hebrew is a register no amount of English
+text can teach.
 
 **The corpus is not vendored.** `data.py` downloads each source from its
 original distributor and writes a `manifest.json` recording counts, character
 totals, SHA-256 hashes and the licence of every source. Provenance stays
 verifiable and we redistribute nobody's corpus.
 
-### Two corpora were rejected
+### v0.2.0: adding Hebrew and encyclopedic English
 
-Both were available, real, and would have added ~17 MB. Both were excluded on
-quality grounds, which is exactly the judgement `CLAUDE.md` asks for:
+The corpus grew from 27 MB to 50.8 MB by adding two sources, both found on
+[Hugging Face Datasets](https://huggingface.co/datasets), reviewed by hand
+(not `load_dataset()`'d straight into training), and pinned to a specific
+revision — the process `CLAUDE.md`'s "Approved sources" section requires:
+
+* **Project Ben-Yehuda** — the Hebrew analogue of Project Gutenberg: a
+  public-domain library of Hebrew literature. The full release is the *entire*
+  library (26,455 works, ~250 MB) — too large to read and vouch for, so it was
+  curated down to seven canonical figures of modern Hebrew writing (Bialik,
+  Rachel Bluwstein, Brenner, Ahad Ha'am, Mendele Mocher Sforim, Tchernichovsky,
+  Frishman), and further filtered by `pseudocatalogue.csv`'s own metadata to
+  their *original* (non-translated) poetry, prose, drama, memoir and essays —
+  dropping their translations and correspondence. That filter mattered: for
+  Bialik alone it was the difference between 10.2 MB (with translations and
+  letters) and 2.9 MB (his own work). Across all seven authors it took the
+  catalogue from ~40 MB down to the 17.6 MB actually used (17.3 MB survives
+  cleaning and chunking). See `_iter_benyehuda_texts` in `data.py`.
+* **Simple English Wikipedia** — encyclopedic reference prose, a register
+  none of the other six English sources supply. A full-language Wikipedia
+  dump runs from hundreds of megabytes to tens of gigabytes; downloading one
+  wholesale would dwarf every other source and could not honestly be called
+  "read". Stub articles and "List of ..." pages were filtered out, and the
+  rest reproducibly sampled down to roughly this corpus's scale rather than
+  Wikipedia's. See `_iter_wikipedia_texts` in `data.py`.
+
+Three other real, available candidates were reviewed and rejected:
+
+* **OSCAR-2301 (Hebrew)** — a raw Common Crawl web scrape: gated access, no
+  per-document quality signal, the usual web-crawl duplication. Ben-Yehuda
+  gives curated, attributed prose instead of unfiltered web text — the same
+  trade this project already made for English (Gutenberg over a web dump).
+* **Sefaria's Hebrew library** — real, carefully edited Hebrew, but GPL-3.0
+  on a text dataset (a licence written for software, with genuinely unclear
+  implications for a trained model's weights), and a liturgical/legal
+  register segmented paragraph-by-paragraph, not continuous prose.
+* **Full English Wikipedia** (`20231101.en`) — 6.4M articles, tens of
+  gigabytes. Nobody could read a representative sample of that. Simple
+  English Wikipedia is the same distributor and licence at a size that can
+  actually be reviewed.
+
+Two English-only rejections from v0.1.0 still stand, for the original reason:
 
 * **Brown corpus** — distributed POS-tagged (`The/at Fulton/np-tl`).
   De-tagging is mechanical but leaves unnatural spacing around punctuation.
@@ -49,7 +91,19 @@ quality grounds, which is exactly the judgement `CLAUDE.md` asks for:
   (`films adapted from comic books , whether they 're`). Casing and spacing are
   destroyed.
 
-Volume was not a good enough reason to teach the model damaged typography.
+Volume was not a good enough reason to teach the model damaged typography, a
+software licence's terms for a dataset, or the boilerplate around an article
+rather than the article.
+
+**A real bug, found by testing the new cleaner.** The first version of the
+Wikipedia tail-strip regex missed three real formatting variants in the actual
+dump: a trailing space before the newline (`"References \n"`), a leading space
+before the header (`" Related pages \n"`), and a section with nothing after it
+at all (`"...\n\nReferences"` at end-of-string). Each was found by checking the
+*cleaned* output of the full sampled set for leftover header words, not by
+inspecting a few examples by eye — three separate real dumps exercised three
+separate edge cases, and eyeballing samples had already missed all of them
+once. All three are now regression tests in `TestWikipediaCleaner`.
 
 ### The split
 
@@ -58,7 +112,7 @@ register in the same proportion as training. Splitting by document count
 instead would have handed validation almost entirely to Reuters, which is
 8,578 of the corpus's documents but only a quarter of its text. Documents are
 first chunked to ≤16 KB at paragraph boundaries so the split unit is roughly
-uniform. Result: 26.97 MB train / 0.35 MB validation.
+uniform. Result: 50.46 MB train / 0.33 MB validation.
 
 ---
 
@@ -67,23 +121,71 @@ uniform. Result: 26.97 MB train / 0.35 MB validation.
 `src/minerva/training/tokenizer.py`
 
 A **byte-level BPE**, implemented and trained here — 8,192 tokens, learned from
-the corpus above in 95 seconds.
+the corpus above in ~4 minutes (up from 95 seconds in v0.1.0: a larger, mixed
+English/Hebrew corpus means more unique pre-token types to weigh).
 
 * **Byte-level base vocabulary.** All 256 byte values are tokens, so every
   possible input encodes. There is no unknown token and no text Swift cannot
-  represent.
+  represent — this held before Hebrew was ever added to the corpus, and it is
+  the reason adding a second script needed no tokenizer *code* changes, only a
+  vocab-size measurement.
 * **GPT-2-style pre-tokenization**, so merges never straddle a space boundary.
 * **Digits are always split individually.** Grouping `1987` into one token
   destroys place-value consistency and makes number handling markedly worse.
 * **`<|endoftext|>` is a real token**, so the model learns that documents end.
 
-Training uses the standard fast path: merges are computed over the ~113k
-*unique* pre-token types weighted by frequency, and pair counts are updated
-incrementally through a pair → containing-words index rather than recounted
-after every merge.
+Training uses the standard fast path: merges are computed over the ~374k
+*unique* pre-token types (from 13.4M total pre-tokens) weighted by frequency,
+and pair counts are updated incrementally through a pair → containing-words
+index rather than recounted after every merge.
 
-Measured compression on the corpus: **3.66 characters per token** →
-**7,377,901 training tokens**, 94,856 validation tokens.
+Measured compression on the v0.2.0 corpus (8,192 tokens): **2.886 characters
+per token overall** → **17,483,579 training tokens**, 105,225 validation
+tokens. Split by script, because a single blended number hides the thing that
+actually matters here:
+
+| | chars/token | bytes/token |
+|---|---|---|
+| English portion | 3.338 | 3.341 |
+| Hebrew portion | 2.276 | 4.065 |
+
+### The vocab-size decision: measured, not guessed
+
+Hebrew is UTF-8-encoded as 2-byte sequences, so an *unmerged* byte-level
+Hebrew token would sit at 0.5 chars/token — the 2.276 measured above is
+already a **4.5× improvement** from merges the trainer learned unprompted;
+Hebrew earned a real share of the 8,192-token budget on frequency alone (the
+very first learned merges include Hebrew bigrams like ` נת` and ` הקט`,
+ahead of `br` or `border`). The question was whether growing the vocabulary
+specifically for Hebrew — the user's own suggestion was 8,192 → 12,000 — was
+worth what it costs: with tied embeddings, every added vocab slot is
+`d_model` = 320 more parameters, so 12,000 tokens means **11,094,080 total
+parameters, +12.3%** over the shipped 9,875,520.
+
+Both tokenizers were actually trained on the real corpus and measured:
+
+| vocab | Hebrew chars/token | English chars/token | overall tokens | total params |
+|---|---|---|---|---|
+| 8,192 | 2.276 | 3.338 | 17,483,575 | 9,875,520 |
+| 12,000 | 2.376 | 3.513 | 16,672,758 | 11,094,080 |
+
+Growing to 12,000 bought **+4.4% Hebrew compression, +5.2% English
+compression, 4.9% fewer overall tokens** — real, but it does not close the
+Hebrew/English gap (the ratio of Hebrew to English chars/token is 0.682 at
+8,192 and 0.676 at 12,000: growing the vocabulary helps both scripts by
+roughly the same proportion, it does not specifically catch Hebrew up). Model
+speed is essentially unaffected either way — the transformer body's
+non-embedding compute (7,254,080 params) is identical at both vocab sizes,
+so the cost of 12,000 is +12.3% more parameters for a ~5% compression gain,
+almost entirely in a bigger embedding table and output projection, not more
+useful capacity.
+
+**Decision: kept at 8,192.** A ~5% compression improvement is not the "strong
+measured reason" `CLAUDE.md` requires to grow the model, and Hebrew is not
+broken at 8,192 — it is measurably, if imperfectly, learning real merges. If
+Hebrew's share of the corpus grows substantially in a future round, this
+measurement should be repeated; the answer is not assumed to be permanent, only
+correct for a 34%-Hebrew, 50.8 MB corpus.
 
 ### A bug the tests caught, and what was done about it
 
@@ -129,8 +231,8 @@ SwiftConfig(vocab_size=8192, n_layer=6, n_head=8, d_model=320, max_seq_len=512)
 # 9,875,520 parameters total (7,254,080 non-embedding), d_ff = 832
 ```
 
-Dropout is **0**, deliberately: with 27 MB of text the model is data-limited,
-not over-fitting, and dropout would only slow learning.
+Dropout is **0**, deliberately: with 50.8 MB of text the model is
+data-limited, not over-fitting, and dropout would only slow learning.
 
 ---
 
@@ -153,11 +255,21 @@ C ≈ 3h × 3,600 × ~120 GFLOP/s      ≈ 1.3 × 10^15 FLOPs
 N ≈ √(C / 120)                     ≈ 3M parameters, D ≈ 60M tokens
 ```
 
-The corpus holds 7.4M unique tokens, so 60M tokens means ~8 epochs. Repeating
-data is near-lossless up to ~4 epochs and degrades after, so the run was
-balanced at **9.9M parameters × 36.9M tokens ≈ 5 epochs** — slightly
+The v0.1.0 corpus held 7.4M unique tokens, so 60M tokens meant ~8 epochs.
+Repeating data is near-lossless up to ~4 epochs and degrades after, so that run
+was balanced at **9.9M parameters × 36.9M tokens ≈ 5 epochs** — slightly
 over-parameterised relative to Chinchilla, which is the right trade when
 unique data, not compute, is the binding constraint.
+
+**v0.2.0 changed the data, not the budget.** Per `CLAUDE.md`, growing the
+architecture or the training time needs a strong measured reason, and neither
+tokenizer size (§2) nor this sizing arithmetic produced one. The step budget
+stayed at 4,500 steps × 8,192 tokens = the same 36.9M tokens trained on, but
+the corpus grew to 17.5M unique tokens (up from 7.4M), so the same compute
+now covers **~2.1 epochs instead of 5** — strictly closer to Chinchilla-optimal
+at the same parameter count, which is exactly the trade `docs/TRAINING.md` §9
+already recommended: more unique data is the highest-value change available,
+and it does not cost a single extra minute of compute.
 
 **The learning rate was chosen by a real experiment, not a guess.** A 70-step
 probe over `{1, 2, 3, 5}×10⁻³` before the run: 1e-3 and 2e-3 tied on early
@@ -254,6 +366,89 @@ That is an accurate description of a 9.9M-parameter base model trained on
 
 ---
 
+## 5b. The run that produced Swift v0.2.0 — adding Hebrew
+
+Same architecture, same step budget, same everything except the corpus and
+the tokenizer trained on it (§1, §2). Measured, not estimated. Reproduce with
+`minerva prepare-data && minerva train`.
+
+| | v0.1.0 | v0.2.0 |
+|---|---|---|
+| Wall clock | 155 min | **98.9 min** |
+| Throughput | ~3,000–5,200 tok/s | ~6,200 tok/s (faster hardware this run) |
+| Steps / tokens | 4,500 × 8,192 = 36.86M | 4,500 × 8,192 = 36.86M (**unchanged**) |
+| Epochs | 5.0 (7.4M unique tokens) | **2.1** (17.5M unique tokens) |
+| Held-out loss | 3.4579 | **3.8542** |
+| Held-out perplexity | 31.75 | **47.19** |
+| Bits per byte | 1.3571 | **1.4516** |
+| Val tokens scored | 94,208 | 102,400 |
+
+**The blended number got worse. Here is why, measured, not guessed** — the
+held-out set was re-scored separately by language:
+
+| | loss | perplexity | bytes/token | bits/byte |
+|---|---|---|---|---|
+| English only | 3.5715 | 35.57 | 3.510 | **1.4678** |
+| Hebrew only | 4.3480 | 77.32 | 4.396 | **1.4270** |
+| Blended (reported above) | 3.8542 | 47.19 | — | 1.4516 |
+
+Two real effects, both expected, both worth naming honestly:
+
+1. **English itself got measurably worse** — bits per byte 1.3571 → 1.4678, a
+   real ~8% regression, not an artifact. The most likely cause is the same
+   fixed 36.86M-token budget now buys 2.1 epochs instead of 5, and the same
+   8,192-token vocabulary is shared with a second script instead of dedicated
+   entirely to English (§2: English compression fell from 3.66 to 3.338
+   chars/token specifically because Hebrew earned a real share of the merge
+   budget).
+2. **Hebrew's perplexity looks far worse than English's, but its bits per
+   byte does not** — 77.32 vs 35.57 in perplexity, but 1.4270 vs 1.4678 in
+   bits per byte, where Hebrew is actually *slightly better*. Hebrew tokens
+   carry more bytes each (4.396 vs 3.510), so a fair, tokenizer-agnostic
+   comparison is bits per byte, not perplexity — and by that measure the model
+   is doing about as well on Hebrew as on English, for the first language
+   it has ever seen, from 17.3 MB, sharing a 9.9M-parameter budget with a
+   second script it also has to carry.
+
+Whether that is a good trade is not this document's call to make unilaterally
+— it is the honest, measured cost of teaching a 9.9M-parameter model two
+languages instead of one, reported the way `CLAUDE.md` requires results to be
+reported, worse number included.
+
+### Real Hebrew samples (temperature 0.8, top-k 40, unedited)
+
+Genuinely novel continuations, not memorised text — `בין כל הצרות` is the
+opening of an Ahad Ha'am essay in the training data, and the model's
+continuation diverges from the real essay after the first three words:
+
+> **"שלום רב"** → *לנו כי אין אנו רשאים לדברים: יודעים אתם, כי גם אלה הם הם
+> חורבים על אחרים, הם באים ואומרים, כי הם אינם נוצרים, כי הם הם עצמם אינם
+> רוצים להניח להם את הלבבות, ורק לפי דעתם הם האחרים, שהם פוסקים להם על כל
+> דבר ואינם יודעים מה זה – אבל מה יעשה? אבל הנה כדי ש*
+
+> **"הַיּוֹם הָלַךְ"** (a poem opening, with niqqud) → *עַל הַפְּרִיפַת
+> הַדָּם לְהַגִּיד הַשְּׂדִים לִקְרֹא לִקְרַאת הַתְּקָרָה, וְזָרִיז עָלֶיהָ
+> תִּש*
+
+> **"בין כל הצרות"** → *וכל השאלות הנפלאות העשויות בהם כל קרבנותם, והביאו את
+> כל אחדותם החיצונית, את כל הצורות והישרה שבמושבה, כי גם על ידיהם הרבות, אשר
+> אין בהם כל סכום קטן ושירם.*
+
+What went right: the model learned real Hebrew morphology — correct verb
+conjugation, correct prefix attachment (ה-/ו-/ל-/ש-), and it learned the
+corpus's own register convention of niqqud on poetry but not prose *without
+being told that rule* — it inferred it from which documents carried diacritics
+and which did not, the same way v0.1.0 inferred `(Applause.)` from State of the
+Union transcripts.
+
+What did not: the Hebrew is grammatical in short spans and loses the thread
+over a full sentence, the same "local coherence, not global coherence" pattern
+v0.1.0 showed in English — and here it is showing up in a second language
+from roughly a third of the training exposure. This is not a chatbot in either
+language, and this document does not describe it as one.
+
+---
+
 ## 6. Running the weights
 
 `src/minerva/engines/native.py`
@@ -281,9 +476,9 @@ and has had no instruction tuning, no chat tuning and no RLHF. Therefore:
 
 These are facts about its training stage, not gaps in the platform, and the
 code states them rather than pretending otherwise. At 9.9M parameters trained
-on 27 MB, Swift is roughly the scale of a small research baseline — it learns
-grammar, vocabulary, register and local coherence. It is not a chatbot and
-should not be described as one.
+on 50.8 MB across two languages, Swift is roughly the scale of a small research
+baseline — it learns grammar, vocabulary, register and local coherence. It is
+not a chatbot and should not be described as one.
 
 ---
 
@@ -381,6 +576,41 @@ The evaluation uses greedy decoding deliberately: with sampling, the same
 checkpoint scored 94.4% and 83.3% tool accuracy on two seeds, and a number that
 swings eleven points with the random seed cannot support a claim.
 
+### v0.2.0: the same 185 examples, retrained on the bilingual base
+
+`swift-instruct` is a fine-tune of `swift`, so when the base model's weights
+changed (§5b), `swift-instruct` was retrained too — otherwise the shipped
+"instruct" model would silently be a fine-tune of a checkpoint no longer in
+the catalogue. **No Hebrew examples were added** — the same 185
+English-only conversations, unchanged, on the new base:
+
+| | v0.1.0 base | v0.2.0 base (+ Hebrew) |
+|---|---|---|
+| format valid | 100.0% | 100.0% |
+| routing accuracy | 94.1% | **91.2%** |
+| tool name accuracy | 88.9% | **94.4%** |
+| argument accuracy | 27.8% | **16.7%** |
+| final answer correct | 31.2% | **18.8%** |
+| honest refusal | 66.7% | **50.0%** |
+
+Mixed, and mostly worse. Tool name accuracy improved, but routing, arguments,
+final answers and honest refusal all fell — a real, measured downstream cost
+of §5b's pretraining trade-off: the base model's English competence itself
+regressed (bits/byte 1.3571 → 1.4678), and a fine-tune built on a weaker base
+produces a weaker fine-tune, on the *identical* 185 examples.
+
+This is why Hebrew examples were **not** added to `swift-instruct` in this
+round, despite that being worth considering explicitly: 185 hand-written
+conversations was already a fragile budget for one language — TRAINING.md's
+own three-round history above shows a 34-example addition swinging honest
+refusal from 50% to 17% in a single round. Splitting an already-thin budget
+across two languages, on a base model whose English just measurably weakened,
+is very likely to make both languages' instruction-following worse rather than
+adding a real capability. The responsible next step is to first see whether a
+larger or longer pretraining run recovers the English regression, and only
+then spend hand-written effort on Hebrew conversations — themselves written
+one at a time, never generated, per `CLAUDE.md`.
+
 ### Thinking was trained, measured, and switched off
 
 The scale is fully wired for this model: above `DO` the engine opens
@@ -388,7 +618,10 @@ The scale is fully wired for this model: above `DO` the engine opens
 back, and there is a recovery path for a turn that never leaves the block. 29
 of the training conversations contain reasoning.
 
-It makes the model **worse**:
+It makes the model **worse** — measured on the v0.1.0 base (this specific
+thinking-on/off comparison was not re-run on the v0.2.0 bilingual base; there
+is no reason to expect the conclusion changes, but it has not been measured
+there):
 
 | | thinking off (`do`) | thinking on (`mi`) |
 |---|---|---|
@@ -444,3 +677,6 @@ training problem, not an engine problem.
 - [ ] Learning rate chosen by a probe, not by assumption
 - [ ] `run_config.json` and `training_log.jsonl` kept with the checkpoints
 - [ ] Real val loss and real samples reported — including if they are bad
+- [ ] If the base model's weights changed, `swift-instruct` retrained from the
+      new base too — a stale fine-tune of a superseded checkpoint is not
+      "the instruct model," it is a different model with the same name

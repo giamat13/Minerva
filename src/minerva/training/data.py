@@ -12,7 +12,7 @@ not redistribute anyone's corpus. Run it with::
 
 Deliberate exclusions
 ---------------------
-Two corpora that were available were rejected on quality grounds, which is the
+Corpora that were available were rejected on quality grounds, which is the
 kind of decision `CLAUDE.md` asks for explicitly:
 
 * **Brown corpus** - distributed POS-tagged (``The/at Fulton/np-tl``).
@@ -21,15 +21,35 @@ kind of decision `CLAUDE.md` asks for explicitly:
 * **Movie reviews (Pang & Lee)** - distributed lowercased and pre-tokenised
   (``films adapted from comic books , whether they 're``). Casing and spacing
   are destroyed, and a language model would learn the damage.
+* **OSCAR-2301 (Hebrew)** - a raw Common Crawl web scrape: gated access,
+  no per-document quality signal, and the usual web-crawl duplication and
+  boilerplate. Project Ben-Yehuda gives curated, individually attributed
+  Hebrew prose instead of unfiltered web text - the same trade this project
+  already made for English by choosing Gutenberg over a web dump.
+* **Sefaria's Hebrew library** - real, carefully edited Hebrew, but a GPL-3.0
+  licence on a text dataset (a licence written for software, whose terms for
+  a trained model's weights are genuinely unclear) and a register - biblical,
+  halakhic and liturgical source text segmented paragraph-by-paragraph, not
+  continuous prose - that would not teach the same thing Project Ben-Yehuda's
+  literature does.
+* **Full English Wikipedia (`wikimedia/wikipedia`, ``20231101.en``)** - 6.4M
+  articles, tens of gigabytes. Nobody could read a representative sample of
+  that and vouch for it. Simple English Wikipedia is used instead: the same
+  distributor, the same licence, a size that can actually be reviewed, and a
+  further quality filter and a bounded, reproducible sample on top (see
+  `_iter_wikipedia_texts`).
 
-Both are real text; neither is *good* text. Volume was not a good enough
-reason to include them.
+None of these are *bad* text, exactly; they are text this project could not
+honestly claim to have read and stand behind at the volume they come in.
+Volume was not a good enough reason to include any of them.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import random
 import re
 import sys
 import unicodedata
@@ -53,6 +73,7 @@ class CorpusSource:
     name: str
     url: str
     #: Glob(s), relative to the extracted archive root, selecting text files.
+    #: Empty for sources whose ``kind`` selects text some other way.
     patterns: tuple[str, ...]
     licence: str
     origin: str
@@ -61,13 +82,21 @@ class CorpusSource:
     skip_names: frozenset[str] = field(default=frozenset({"README", "CONTENTS", "cats.txt"}))
     #: Optional per-source cleaner applied to each file's text.
     cleaner: str = "generic"
+    #: How to fetch and select this source's documents. "archive" (the
+    #: default) downloads `url` as a zip and globs `patterns` inside it - see
+    #: `_iter_source_texts`. A source that cannot be selected by filename glob
+    #: alone gets its own kind and iterator function instead, dispatched in
+    #: `build_corpus` - see `_iter_benyehuda_texts` and `_iter_wikipedia_texts`.
+    kind: str = "archive"
 
 
 # --- THE CORPUS ------------------------------------------------------------
-# Roughly 28 MB of clean English prose across four registers: literature,
-# newswire, spoken/political oratory, and informal web writing. The mix is
-# deliberate - a model trained only on 19th-century novels writes only
-# 19th-century novels.
+# Roughly 50 MB across six English registers - literature, newswire,
+# spoken/political oratory, informal web writing, and now encyclopedic
+# reference prose - plus Swift's first non-English source: curated Hebrew
+# literature. The mix is deliberate - a model trained only on 19th-century
+# novels writes only 19th-century novels, and a model that never sees Hebrew
+# cannot write it.
 SOURCES: tuple[CorpusSource, ...] = (
     CorpusSource(
         name="gutenberg",
@@ -133,6 +162,54 @@ SOURCES: tuple[CorpusSource, ...] = (
         ),
         cleaner="europarl",
     ),
+    CorpusSource(
+        name="wikipedia_simple_en",
+        url=(
+            "https://huggingface.co/datasets/wikimedia/wikipedia/resolve/"
+            "b04c8d1ceb2f5cd4588862100d08de323dccfbaa/20231101.simple/"
+            "train-00000-of-00001.parquet"
+        ),
+        patterns=(),  # parquet, selected by _iter_wikipedia_texts, not a glob
+        licence="CC BY-SA 3.0 and GFDL",
+        origin=(
+            "Simple English Wikipedia, 2023-11-01 dump - wikimedia/wikipedia "
+            "revision b04c8d1 on Hugging Face"
+        ),
+        description=(
+            "Encyclopedic reference prose: explanatory, third-person, built "
+            "around a defined topic rather than a narrative or an argument - "
+            "a register none of the other English sources supply. A random, "
+            "reproducible sample of full articles (stubs and 'List of ...' "
+            "pages excluded), not the whole 157 MB dump - see "
+            "_iter_wikipedia_texts for why."
+        ),
+        cleaner="wikipedia",
+        kind="wikipedia",
+    ),
+    CorpusSource(
+        name="benyehuda",
+        url=(
+            "https://github.com/projectbenyehuda/public_domain_dump/releases/"
+            "download/2026-03/txt.zip"
+        ),
+        patterns=(),  # curated from the catalogue by _iter_benyehuda_texts
+        licence="Public domain",
+        origin=(
+            "Project Ben-Yehuda, https://benyehuda.org - the release tagged "
+            "2026-03 of https://github.com/projectbenyehuda/public_domain_dump"
+        ),
+        description=(
+            "Hebrew literature, Swift's first non-English source: original "
+            "(non-translated) poetry, prose, drama and essays by seven "
+            "canonical figures of modern Hebrew writing - Bialik, Rachel "
+            "Bluwstein, Brenner, Ahad Ha'am, Mendele Mocher Sforim, "
+            "Tchernichovsky and Frishman. The Hebrew analogue of the "
+            "Gutenberg entry above: curated authors, not the whole library - "
+            "see _iter_benyehuda_texts for the selection criteria."
+        ),
+        cleaner="benyehuda",
+        kind="benyehuda",
+    ),
 )
 
 
@@ -185,6 +262,123 @@ def _matches(name: str, pattern: str) -> bool:
     return fnmatch(name, pattern)
 
 
+# --- Sources that cannot be selected by filename glob alone ----------------
+#
+# `download_source` + `_iter_source_texts` cover every source whose wanted
+# documents are just "every file matching this glob inside this zip". These
+# two are not: which document belongs in the corpus depends on metadata that
+# does not live in a filename, so each gets its own small iterator instead of
+# forcing the glob abstraction to do something it was not built for.
+
+#: The seven person-ids (Project Ben-Yehuda's folder scheme) whose *original*
+#: (non-translated) work was curated for `benyehuda`. Chosen and measured by
+#: hand: filtering to original_language == "" and excluding the "letters" and
+#: "reference" genres took Bialik's contribution from 10.2 MB (which includes
+#: his translations and correspondence) down to 2.9 MB of his own poetry,
+#: articles and prose. Across all seven, the same filter is the difference
+#: between a ~40 MB pull of the whole catalogue and a 17.6 MB curated one.
+_BENYEHUDA_AUTHOR_IDS = frozenset({"p89", "p141", "p66", "p23", "p44", "p57", "p142"})
+_BENYEHUDA_EXCLUDED_GENRE_SUBSTRINGS = ("letters", "reference")
+_BENYEHUDA_CATALOGUE_URL = (
+    "https://github.com/projectbenyehuda/public_domain_dump/releases/"
+    "download/2026-03/pseudocatalogue.csv"
+)
+
+
+def _iter_benyehuda_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
+    """Curate Project Ben-Yehuda's library down to seven authors' own work.
+
+    The release this source downloads is the *entire* public-domain Hebrew
+    library - over 26,000 works, ~250 MB - the Hebrew analogue of "all of
+    Project Gutenberg," not something anyone could read and vouch for.
+    `pseudocatalogue.csv` records each work's author (as a person-id folder,
+    e.g. Bialik is ``p89``), genre and original language, which is enough to
+    keep only original Hebrew poetry, prose, drama, memoir and essays by the
+    seven curated authors and drop their translations and correspondence.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    catalogue_path = cache_dir / "benyehuda_pseudocatalogue.csv"
+    if not (catalogue_path.exists() and catalogue_path.stat().st_size > 0):
+        print(f"  downloading benyehuda catalogue from {_BENYEHUDA_CATALOGUE_URL}")
+        with urllib.request.urlopen(_BENYEHUDA_CATALOGUE_URL, timeout=60) as response:
+            catalogue_path.write_bytes(response.read())
+
+    with catalogue_path.open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    wanted_paths: set[str] = set()
+    for row in rows:
+        person_id = row["path"].split("/")[1]
+        if person_id not in _BENYEHUDA_AUTHOR_IDS:
+            continue
+        if (row["original_language"] or "").strip():
+            continue  # a translation, not this author's own Hebrew
+        if any(s in row["genre"] for s in _BENYEHUDA_EXCLUDED_GENRE_SUBSTRINGS):
+            continue  # correspondence or a bibliographic stub, not prose
+        wanted_paths.add(row["path"].strip("/") + ".txt")
+
+    archive = download_source(source, cache_dir)
+    with zipfile.ZipFile(archive) as zf:
+        for name in zf.namelist():
+            member_path = name.removeprefix("txt/")
+            if member_path not in wanted_paths:
+                continue
+            yield zf.read(name).decode("utf-8")
+
+
+#: Below this many raw characters, a Wikipedia article is almost always a
+#: stub - a sentence or two, not a representative sample of the register.
+_WIKIPEDIA_MIN_RAW_CHARS = 1500
+_WIKIPEDIA_EXCLUDED_TITLE_PREFIXES = ("List of", "Lists of")
+#: Sampled to roughly this many raw characters - the scale of this corpus's
+#: other sources, not the scale of Wikipedia. Measured before the tail-strip
+#: cleaner runs, so the corpus's actual contribution comes out a bit lower.
+_WIKIPEDIA_SAMPLE_CHARS = 6_500_000
+
+
+def _iter_wikipedia_texts(source: CorpusSource, cache_dir: Path, seed: int) -> Iterator[str]:
+    """Download one Wikimedia Wikipedia parquet dump and reproducibly sample it.
+
+    A full-language dump runs from hundreds of megabytes (Simple English) to
+    tens of gigabytes (English) - downloading one wholesale would dwarf every
+    other source and could not plausibly be "read" per source, the way
+    `CLAUDE.md` requires. This keeps only substantive articles (stubs and
+    "List of ..." pages excluded, since those are barely prose) and samples
+    them down, with the same seed the corpus split itself uses, to roughly
+    this corpus's scale rather than Wikipedia's.
+    """
+    import pyarrow.parquet as pq
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / f"{source.name}.parquet"
+    if not (target.exists() and target.stat().st_size > 0):
+        print(f"  downloading {source.name} from {source.url}")
+        with urllib.request.urlopen(source.url, timeout=300) as response:
+            payload = response.read()
+        target.write_bytes(payload)
+        print(f"  {source.name}: {len(payload) / 1e6:.2f} MB")
+
+    table = pq.read_table(target, columns=["title", "text"])
+    titles = table.column("title").to_pylist()
+    texts = table.column("text").to_pylist()
+
+    candidates = [
+        i
+        for i, (title, text) in enumerate(zip(titles, texts, strict=True))
+        if len(text) >= _WIKIPEDIA_MIN_RAW_CHARS
+        and not title.startswith(_WIKIPEDIA_EXCLUDED_TITLE_PREFIXES)
+    ]
+    rng = random.Random(seed)
+    rng.shuffle(candidates)
+
+    total = 0
+    for i in candidates:
+        if total >= _WIKIPEDIA_SAMPLE_CHARS:
+            break
+        yield texts[i]
+        total += len(texts[i])
+
+
 # ---------------------------------------------------------------------------
 # Cleaning
 #
@@ -231,11 +425,51 @@ def _clean_europarl(text: str) -> str:
     return _clean_generic(_EUROPARL_TAG.sub("", text))
 
 
+# Every Project Ben-Yehuda text file ends with a volunteer credit paragraph
+# ("the text[s] above were produced by Project Ben-Yehuda volunteers online.
+# always available at the following address: https://benyehuda.org/read/...").
+# It is real Hebrew, but it is the same paragraph on every single file, and a
+# link, not prose. Matched on the fixed, distinctive opening rather than on
+# "text" alone, since ordinary Hebrew prose can plainly say "the text".
+_BENYEHUDA_FOOTER = re.compile(
+    re.escape("את הטקסט[ים] לעיל הפיקו מתנדבי פרויקט בן־יהודה") + r".*",
+    re.DOTALL,
+)
+
+# A Wikipedia article's apparatus - References, Related pages, Other
+# websites, See also, and the bare category tags that follow them with no
+# header at all - is not prose. It is noun-phrase link titles, one per line.
+# Cut at the first such section; the category tags come after it and go too.
+# Headers are sometimes padded with spaces on both sides (e.g. " References
+# \n", seen on articles with an inline footnote marker right before the
+# heading) - the [ \t]* on each side absorbs that. And an empty section is
+# sometimes the last thing in the article, with no trailing newline at all
+# (e.g. "...home in the region.\n\nReferences" then end of string) - (?:\n|\Z)
+# accepts end-of-string as well as a following newline.
+_WIKIPEDIA_TAIL_SECTIONS = re.compile(
+    r"\n[ \t]*(?:References|Related pages|Other websites|See also|Further reading|"
+    r"Bibliography|External links|Notes)[ \t]*(?:\n|\Z)"
+)
+
+
+def _clean_benyehuda(text: str) -> str:
+    return _clean_generic(_BENYEHUDA_FOOTER.sub("", text))
+
+
+def _clean_wikipedia(text: str) -> str:
+    match = _WIKIPEDIA_TAIL_SECTIONS.search(text)
+    if match:
+        text = text[: match.start()]
+    return _clean_generic(text)
+
+
 _CLEANERS = {
     "generic": _clean_generic,
     "gutenberg": _clean_gutenberg,
     "reuters": _clean_reuters,
     "europarl": _clean_europarl,
+    "benyehuda": _clean_benyehuda,
+    "wikipedia": _clean_wikipedia,
 }
 
 # A document shorter than this after cleaning is almost always a stub, a stray
@@ -303,7 +537,6 @@ def build_corpus(
     `CLAUDE.md` requires.
     """
     import json
-    import random
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -315,12 +548,19 @@ def build_corpus(
     per_source: list[dict[str, object]] = []
 
     for source in SOURCES:
-        archive = download_source(source, cache_dir)
+        raw_texts: Iterator[str]
+        if source.kind == "wikipedia":
+            raw_texts = _iter_wikipedia_texts(source, cache_dir, seed)
+        elif source.kind == "benyehuda":
+            raw_texts = _iter_benyehuda_texts(source, cache_dir)
+        else:
+            archive = download_source(source, cache_dir)
+            raw_texts = (text for _name, text in _iter_source_texts(archive, source))
         cleaner = _CLEANERS[source.cleaner]
 
         chunks: list[str] = []
         skipped = 0
-        for _name, text in _iter_source_texts(archive, source):
+        for text in raw_texts:
             cleaned = cleaner(text)
             if len(cleaned) < _MIN_DOCUMENT_CHARS:
                 skipped += 1
@@ -391,6 +631,14 @@ def build_corpus(
             "brown": "distributed POS-tagged; de-tagging leaves unnatural punctuation spacing",
             "movie_reviews": (
                 "distributed lowercased and pre-tokenised; casing and spacing destroyed"
+            ),
+            "oscar-2301_he": "gated web scrape; no per-document quality signal",
+            "sefaria_hebrew_library": (
+                "GPL-3.0 on text data, and a liturgical/legal register, not prose"
+            ),
+            "wikipedia_full_en": (
+                "6.4M articles, tens of GB; too large to review - used the "
+                "'simple' config, sampled and filtered, instead"
             ),
         },
     }

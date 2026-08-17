@@ -15,10 +15,12 @@ from minerva.training.data import (
     DOCUMENT_SEPARATOR,
     SOURCES,
     _chunk_document,
+    _clean_benyehuda,
     _clean_europarl,
     _clean_generic,
     _clean_gutenberg,
     _clean_reuters,
+    _clean_wikipedia,
 )
 
 
@@ -101,6 +103,69 @@ class TestEuroparlCleaner:
         cleaned = _clean_europarl(raw)
         assert "<SPEAKER" not in cleaned
         assert "I declare the session resumed." in cleaned
+
+
+class TestBenyehudaCleaner:
+    def test_the_volunteer_credit_paragraph_is_removed(self) -> None:
+        raw = (
+            "שָׁלוֹם רָב שׁוּבֵךְ, צִפֹּרָה נֶחְמֶדֶת\n\n"
+            "את הטקסט[ים] לעיל הפיקו מתנדבי פרויקט בן־יהודה באינטרנט."
+            "  הכל זמין תמיד בכתובת הבאה:https://benyehuda.org/read/20"
+        )
+        cleaned = _clean_benyehuda(raw)
+        assert "הפיקו מתנדבי" not in cleaned
+        assert "benyehuda.org" not in cleaned
+        assert cleaned == "שָׁלוֹם רָב שׁוּבֵךְ, צִפֹּרָה נֶחְמֶדֶת"
+
+    def test_the_word_text_in_ordinary_prose_is_not_a_false_match(self) -> None:
+        # "את הטקסט" ("the text") is ordinary Hebrew, not just the credit
+        # boilerplate's opening words - only the full, distinctive sentence
+        # should trigger a cut.
+        raw = "הוא דן בפרשנות של את הטקסט המקראי לעומק."
+        assert _clean_benyehuda(raw) == raw.strip()
+
+
+class TestWikipediaCleaner:
+    def test_a_references_section_is_cut(self) -> None:
+        raw = "The sturgeon lives in the river.\n\nReferences\n\n1. A citation."
+        cleaned = _clean_wikipedia(raw)
+        assert "References" not in cleaned
+        assert cleaned == "The sturgeon lives in the river."
+
+    def test_bare_category_tags_after_the_section_are_cut_too(self) -> None:
+        raw = (
+            "Intel released the chip in 2006.\n\nOther websites\nIntel Core Duo\n\n"
+            "Computer hardware\nIntel Core processors"
+        )
+        cleaned = _clean_wikipedia(raw)
+        assert cleaned == "Intel released the chip in 2006."
+
+    def test_a_trailing_space_before_the_newline_is_still_matched(self) -> None:
+        # A real dump had "References \n" - a stray space before the
+        # newline that a naive "\nReferences\n" pattern misses entirely.
+        raw = "Iraq has suffered from extremism.\n\nReferences \n\nNationalism"
+        cleaned = _clean_wikipedia(raw)
+        assert "Nationalism" not in cleaned
+        assert cleaned == "Iraq has suffered from extremism."
+
+    def test_a_leading_space_before_the_header_is_still_matched(self) -> None:
+        # A real dump had " Related pages \n" - padded on both sides, likely
+        # from a footnote marker immediately before the heading.
+        raw = "Banksy's street art is well known.\n\n Related pages \n Homage to Banksy"
+        cleaned = _clean_wikipedia(raw)
+        assert "Related pages" not in cleaned
+        assert cleaned == "Banksy's street art is well known."
+
+    def test_an_empty_section_at_the_very_end_with_no_trailing_newline(self) -> None:
+        # A real dump ended exactly on "...\n\nReferences" - end of string,
+        # no newline after the header at all.
+        raw = "Waterfowl make their home in the region.\n\nReferences"
+        cleaned = _clean_wikipedia(raw)
+        assert cleaned == "Waterfowl make their home in the region."
+
+    def test_an_article_with_no_tail_section_is_left_alone(self) -> None:
+        raw = "A short article with no references section at all."
+        assert _clean_wikipedia(raw) == raw
 
 
 class TestChunking:
