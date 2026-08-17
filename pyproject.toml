@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Minerva - an AI model platform. First model: Swift."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 authors = [{ name = "Minerva" }]
 keywords = ["llm", "ai", "ollama", "tool-calling", "agents"]
 classifiers = [

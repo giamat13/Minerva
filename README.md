@@ -298,4 +298,4 @@ Contributor rules — including the standard for training data — are in
 
 ## Licence
 
-Apache-2.0.
+MIT. See [`LICENSE`](LICENSE).
