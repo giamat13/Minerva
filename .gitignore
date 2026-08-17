@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+.venv/
+venv/
+env/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+.idea/
+.vscode/
+.DS_Store
+
+# Local, machine-specific configuration (never commit endpoints/secrets).
+minerva.local.toml
+.env
