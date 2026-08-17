@@ -193,6 +193,67 @@ batches it already saw.
 
 ---
 
+## 5a. The run that produced Swift v0.1.0
+
+Measured, not estimated. Reproduce with `minerva prepare-data && minerva train`.
+
+| | |
+|---|---|
+| Hardware | 4-core Intel Xeon @ 2.1 GHz, **no GPU** |
+| Wall clock | **155 minutes** |
+| Steps | 4,500 × 8,192 tokens = **36.86M tokens** (5.0 epochs) |
+| Throughput | ~3,000–5,200 tokens/second |
+| Final held-out loss | **3.4579** |
+| Final held-out perplexity | **31.75** (chance = 8,192) |
+| Bits per byte | **1.3571** |
+| Validation tokens scored | 94,208 (the entire held-out split) |
+
+### The curve
+
+Monotonic throughout — no divergence, no plateau, no instability. Gradient norm
+stayed near 0.5 for the whole run.
+
+| step | val loss | perplexity | | step | val loss | perplexity |
+|---|---|---|---|---|---|---|
+| 250 | 4.8436 | 126.93 | | 2,500 | 3.6281 | 37.64 |
+| 500 | 4.3686 | 78.93 | | 3,000 | 3.5561 | 35.03 |
+| 750 | 4.1692 | 64.67 | | 3,500 | 3.5045 | 33.27 |
+| 1,000 | 4.0143 | 55.38 | | 4,000 | 3.4716 | 32.19 |
+| 1,500 | 3.8481 | 46.90 | | 4,250 | 3.4639 | 31.94 |
+| 2,000 | 3.7248 | 41.46 | | **4,500** | **3.4604** | **31.83** |
+
+Loss was still falling at the end. The model is **data-limited, not
+compute-limited**: 7.4M unique tokens seen five times over. More corpus is the
+highest-value next change, not more steps.
+
+### Real samples (temperature 0.8, top-k 40, unedited)
+
+> **"The company said it expects"** → *to provide a 5-1/2 pct stock dividend of
+> 10 cts a share. It said it will continue to operate in the New York and Exco
+> Health Commission to pay off the total value of the common shares on the
+> outstanding common stock. The company said it expects to spend 400,000 dlrs in*
+
+> **"My fellow citizens, we gather today to"** → *our own country, and the
+> future will make us happy. We have a new spirit of confidence and opportunity
+> for all Americans -- to do their share in peace in the world. (Applause.) And
+> our friends, and the leaders of the community in Latin America*
+
+What went right: syntax is largely well-formed, and the model learned genuine
+register. It reproduces Reuters house style down to the abbreviations —
+`pct`, `cts`, `dlrs`, `5-1/2` — and picked up `(Applause.)` from the State of
+the Union transcripts. Those are corpus-specific conventions nobody coded.
+
+What did not: **register conditioning is unreliable.** Two of the five sample
+prompts drew the wrong register — the Austen opening produced political
+oratory, and the Reuters weather opening produced Austen-ish domestic prose.
+Semantics drift within a couple of sentences ("the New York and Exco Health
+Commission" is not a thing). Local coherence is good; global coherence is not.
+
+That is an accurate description of a 9.9M-parameter base model trained on
+27 MB, and it is what this much compute buys. It is not a chatbot.
+
+---
+
 ## 6. Running the weights
 
 `src/minerva/engines/native.py`

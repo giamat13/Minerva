@@ -92,8 +92,38 @@ SwiftConfig(vocab_size=8192, n_layer=6, n_head=8, d_model=320, max_seq_len=512)
 tokens ≈ 5 epochs. The learning rate came from a real 70-step probe over
 {1,2,3,5}×10⁻³ before committing to the run.
 
-Full detail, including the sizing arithmetic and a bug the tests caught, is in
-[`docs/TRAINING.md`](docs/TRAINING.md).
+**5. The result** — 155 minutes on 4 CPU cores, 36.86M tokens, 5 epochs:
+
+| | measured |
+|---|---|
+| held-out loss | **3.4579** |
+| held-out perplexity | **31.75** (chance = 8,192) |
+| bits per byte | **1.3571** |
+
+The curve fell monotonically from perplexity 126.9 at step 250 to 31.8 at step
+4,500, and **was still falling when the run ended** — Swift is data-limited,
+not compute-limited. More corpus is the highest-value next change.
+
+Full detail, including the sizing arithmetic, the curve, real samples and a bug
+the tests caught, is in [`docs/TRAINING.md`](docs/TRAINING.md).
+
+### What it actually learned
+
+Real, unedited output at temperature 0.8:
+
+> **"The company said it expects"** → *to provide a 5-1/2 pct stock dividend of
+> 10 cts a share. It said it will continue to operate in the New York and Exco
+> Health Commission to pay off the total value of the common shares on the
+> outstanding common stock.*
+
+It reproduces Reuters house style down to the abbreviations — `pct`, `cts`,
+`dlrs` — and picked up `(Applause.)` from the State of the Union transcripts.
+Nobody coded those; they are corpus conventions it inferred.
+
+It also gets things wrong, and this README will say so: **register conditioning
+is unreliable** — an Austen opening can produce political oratory — and
+semantics drift within a couple of sentences. Local coherence is good, global
+coherence is not.
 
 ---
 
@@ -102,10 +132,11 @@ Full detail, including the sizing arithmetic and a bug the tests caught, is in
 **Swift is a base language model.** It was pretrained to predict the next token
 and has had no instruction tuning, no chat tuning and no RLHF. So:
 
-* It **continues text**. Give it `"The Bahia cocoa zone"` and it writes
-  plausible newswire. Give it `"What is the capital of France?"` and it will
-  most likely write *more questions* — because that is what follows a question
-  in its training data.
+* It **continues text**. Give it `"The company said it expects"` and it writes
+  plausible Reuters copy. Give it `"What is the capital of France?"` and it
+  will most likely write *more questions* — because that is what follows a
+  question in its training data. It also picks the wrong register a fair
+  fraction of the time; see the measured samples above.
 * It **cannot call tools.** Tool calling is a trained behaviour.
 * It **has no reasoning phase**, so every thinking level resolves to `do`.
 
@@ -222,6 +253,9 @@ Runnable examples are in [`examples/`](examples/).
 | Model | Tier | Params | Trained on | Engine | Tools | Thinking |
 |-------|------|--------|------------|--------|-------|----------|
 | **Swift** | small | 9.9M | 27 MB, from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
+
+Swift v0.1.0: held-out perplexity **31.75**, bits/byte **1.3571**, trained in
+155 minutes on 4 CPU cores.
 
 More models are coming; the registry is built to take them.
 See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
