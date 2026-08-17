@@ -1,0 +1,47 @@
+# Minerva configuration.
+#
+# Copy this to `minerva.toml` (shared, committed) or `minerva.local.toml`
+# (machine-specific, git-ignored) and edit. Every setting can also be given as
+# a MINERVA_* environment variable, which takes precedence over this file.
+#
+# Precedence: built-in defaults < this file < MINERVA_* < explicit arguments.
+
+# --- engine -----------------------------------------------------------------
+
+# Which engine runs inference. See `minerva doctor` for what is registered.
+engine = "ollama"
+
+# Where the Ollama daemon lives. Set this to a remote host to run inference
+# elsewhere (MINERVA_OLLAMA_HOST).
+ollama_host = "http://127.0.0.1:11434"
+
+# Read timeout in seconds. Generous by default: a cold model load on CPU
+# genuinely can take minutes.
+request_timeout = 300.0
+
+# How long the engine keeps the model resident after a call. Ollama syntax:
+# "5m" keeps it warm, "0" unloads immediately, "-1" keeps it forever.
+# keep_alive = "5m"
+
+# --- defaults for a session -------------------------------------------------
+
+# Which Minerva model to use when none is named.
+default_model = "swift"
+
+# Default note on the solfège scale. Accepts a Latin name ("sol"), a Hebrew
+# name ("סול"), an index (0-6) or an alias ("high", "max", "off").
+thinking_level = "fa"
+
+# Stream output as it is generated.
+stream = true
+
+# Show the model's reasoning trace. Off by default: it is working material,
+# not the answer.
+show_thinking = false
+
+# Offer tools to the model at all.
+enable_tools = true
+
+# Ceiling on tool-calling rounds per request. Leave unset to derive it from the
+# thinking level - deeper thinking gets a longer leash.
+# max_tool_iterations = 8
