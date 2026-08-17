@@ -313,6 +313,18 @@ def cmd_train(args: argparse.Namespace) -> int:
     return train_main(forwarded)
 
 
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """Measure a trained checkpoint on held-out text."""
+    from .training.evaluate import main as evaluate_main
+
+    forwarded = ["--checkpoint", str(args.checkpoint), "--data", str(args.data)]
+    if args.json:
+        forwarded += ["--json", str(args.json)]
+    if args.max_batches is not None:
+        forwarded += ["--max-batches", str(args.max_batches)]
+    return evaluate_main(forwarded)
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     """Ask one question."""
     config = _config_from_args(args)
@@ -524,6 +536,15 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--threads", type=int, default=None)
     train.add_argument("--resume", type=Path, default=None)
     train.set_defaults(func=cmd_train)
+
+    evaluate = sub.add_parser(
+        "evaluate", parents=[common], help="measure a trained checkpoint"
+    )
+    evaluate.add_argument("--checkpoint", type=Path, default=Path("checkpoints/swift/best.pt"))
+    evaluate.add_argument("--data", type=Path, default=Path("data"))
+    evaluate.add_argument("--max-batches", type=int, default=None)
+    evaluate.add_argument("--json", type=Path, default=None)
+    evaluate.set_defaults(func=cmd_evaluate)
 
     ask = sub.add_parser("ask", parents=[common, generation], help="continue a prompt")
     ask.add_argument("prompt", help="the question")

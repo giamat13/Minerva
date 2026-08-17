@@ -40,12 +40,14 @@ __all__ = [
     "TrainConfig",
     "Trainer",
     "build_corpus",
+    "evaluate_checkpoint",
     "train_bpe",
 ]
 
 if TYPE_CHECKING:  # pragma: no cover - import-time typing only
     from .data import SOURCES, build_corpus
     from .dataset import TokenDataset
+    from .evaluate import evaluate_checkpoint
     from .model import SWIFT_CONFIG, SwiftConfig, SwiftLM
     from .tokenizer import BPETokenizer, train_bpe
     from .trainer import TrainConfig, Trainer
@@ -65,6 +67,7 @@ _LAZY: dict[str, str] = {
     "SwiftLM": ".model",
     "TrainConfig": ".trainer",
     "Trainer": ".trainer",
+    "evaluate_checkpoint": ".evaluate",
 }
 
 
