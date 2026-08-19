@@ -164,13 +164,14 @@ coherence is not.
 The base model continues text; it does not answer questions. So there is a
 second stage, and a second model in the catalogue.
 
-`minerva finetune` trains `swift` on **185 hand-written conversations** onto a
-chat format with nine single-token markers. No script, no templates, no
-permuted slot values. Tool results in the training data are never invented: an
-example declares the *call*, and the build runs the real tool to get the result.
+`minerva finetune` trains `swift` on **219 hand-written conversations** (185
+English + 34 Hebrew) onto a chat format with nine single-token markers. No
+script, no templates, no permuted slot values. Tool results in the training
+data are never invented: an example declares the *call*, and the build runs
+the real tool to get the result.
 
-**It genuinely calls tools.** The model decides, the real tool executes, the
-result is fed back:
+**It genuinely calls tools, in either language.** The model decides, the real
+tool executes, the result is fed back:
 
 ```
 Q: What is 17 times 43?
@@ -178,35 +179,48 @@ Q: What is 17 times 43?
    <- real tool returned: '731'
 A: '17 times 43 is 731.'
 
+Q: כמה זה 1999 ועוד 2024?
+   -> model asked for: calculate({"expression": "1999 + 2024"})
+   <- real tool returned: '4023'
+A: 'יוצא 4023.'
+
 Q: Who won the World Cup in 2022?
 A: 'I do not know. I am a small model and I was not trained on recent events.'
 ```
 
-`swift-instruct` is a fine-tune of `swift`, so v0.2.0's Hebrew pretraining run
-(above) meant retraining it from the new base — on the same, unchanged 185
-examples; **no Hebrew was added to the instruct set**, see
-[`docs/TRAINING.md`](docs/TRAINING.md#v020-the-same-185-examples-retrained-on-the-bilingual-base)
-for why. Measured on 34 **held-out** hand-written prompts, greedy decoding
-(`minerva evaluate-instruct`):
+`swift-instruct` was retrained twice for v0.2.0. Round one kept the same 185
+English examples on the new bilingual base and measured a real regression
+(English competence itself weakened during pretraining, §5b). Round two added
+34 hand-written Hebrew conversations — same rules, written one at a time, no
+templates — plus 10 held-out Hebrew evaluation prompts to actually measure it.
+Full history in
+[`docs/TRAINING.md`](docs/TRAINING.md#v020-round-two-34-hand-written-hebrew-examples-added).
+Scored separately by language, greedy decoding (`minerva evaluate-instruct`):
 
-| | v0.1.0 base | v0.2.0 base (+ Hebrew) |
-|---|---|---|
-| format valid | 100.0% | 100.0% |
-| routing accuracy (call a tool or not) | 94.1% | **91.2%** |
-| tool name accuracy | 88.9% | **94.4%** |
-| **argument accuracy** | 27.8% | **16.7%** |
-| final answer correct | 31.2% | **18.8%** |
-| honest refusal | 66.7% | **50.0%** |
+| | v0.1.0, 185 English | v0.2.0, 185 English only | v0.2.0 +Hebrew — English cases | v0.2.0 +Hebrew — Hebrew cases |
+|---|---|---|---|---|
+| held-out cases | 34 | 34 | 34 | 10 |
+| routing accuracy | 94.1% | 91.2% | **97.1%** | 80.0% |
+| tool name accuracy | 88.9% | 94.4% | 94.4% | 83.3% |
+| argument accuracy | 27.8% | 16.7% | **22.2%** | 16.7% |
+| final answer correct | 31.2% | 18.8% | 18.8% | 20.0% |
+| honest refusal | 66.7% | 50.0% | **66.7%** | **0.0%** |
 
-Mixed, mostly down — a real, measured downstream cost of teaching the base
-model Hebrew: its English competence itself regressed a real (if modest) 8% in
-bits/byte, and a fine-tune of a slightly weaker base is a slightly weaker
-fine-tune, on the identical training data. It is still bad at **arguments** —
-asked to `Add 314 and 159` it now answers `'1584 is 1385'` (correct answer:
-473) — and worse at it than before. Routing is a one-token decision learnable
-from 185 examples; copying arbitrary operands correctly is a general skill
-that needs far more data than a hand-written set of this size can carry, on
-either language. That limitation is in the model's spec, in the docs, and in
+A genuine surprise: adding Hebrew examples did not dilute English further — it
+**recovered** most of round one's regression (routing 91.2% → 97.1%, refusal
+back to v0.1.0's 66.7%). Most likely, 34 more examples in either language is
+simply more signal for the one-token routing decision than 185 alone carried,
+and the habit transfers across the language boundary.
+
+Hebrew itself is real but weaker, reported plainly: routing (80.0%) and tool
+name accuracy (83.3%) are decent for a first round on 34 examples, but
+**honest refusal on Hebrew is 0%** — both held-out Hebrew refusal cases got a
+wrong or garbled answer instead of a decline, one of them in English despite
+being asked in Hebrew. Five Hebrew refusal examples was too few to learn the
+habit from. It is still bad at **arguments** in both languages — asked
+`Add 314 and 159` it answers `'4710'` (correct: 473) — copying arbitrary
+operands correctly is a general skill 219 hand-written examples cannot fully
+carry. That limitation is in the model's spec, in the docs, and in
 `examples/04_tools_and_thinking.py`, which prints a failure next to every
 success.
 
@@ -356,13 +370,14 @@ Runnable examples are in [`examples/`](examples/).
 | Model | Tier | Params | Trained on | Engine | Tools | Thinking |
 |-------|------|--------|------------|--------|-------|----------|
 | **Swift** | small | 9.9M | 50.8 MB (English + Hebrew), from scratch | `minerva` (in-process) | ✗ base model | ✗ base model |
-| **Swift-Instruct** | small | 9.9M | + 185 hand-written conversations | `minerva` (in-process) | ✅ 91% routing | ✗ measured to hurt |
+| **Swift-Instruct** | small | 9.9M | + 219 hand-written conversations (185 EN + 34 HE) | `minerva` (in-process) | ✅ 97% EN / 80% HE routing | ✗ measured to hurt |
 
 Swift v0.2.0: held-out perplexity **47.19**, bits/byte **1.4516**, trained in
-98.9 minutes on 4 CPU cores. Swift-Instruct v0.2.0: **91.2%** routing accuracy,
-**16.7%** argument accuracy on held-out prompts — both down from v0.1.0
-(English-only), a real, measured cost of adding Hebrew at this size; see
-[`docs/TRAINING.md`](docs/TRAINING.md#5b-the-run-that-produced-swift-v020--adding-hebrew).
+98.9 minutes on 4 CPU cores — see
+[`docs/TRAINING.md`](docs/TRAINING.md#5b-the-run-that-produced-swift-v020--adding-hebrew)
+for the real, measured cost of adding Hebrew at this size. Swift-Instruct
+v0.2.0: **97.1%** routing accuracy on English, **80.0%** on Hebrew (a first,
+smaller round — honest refusal in Hebrew is still 0%, not hidden).
 
 More models are coming; the registry is built to take them.
 See [`docs/ADDING_A_MODEL.md`](docs/ADDING_A_MODEL.md).
@@ -380,7 +395,7 @@ src/minerva/
 │   ├── model.py          SwiftLM: RMSNorm, RoPE, SwiGLU, GQA, tied embeddings
 │   ├── trainer.py        Stage 1: pretraining from scratch
 │   ├── chat.py           The chat format - one definition, used by all three
-│   ├── instruct_data.py  185 hand-written conversations, real tool results
+│   ├── instruct_data.py  219 hand-written conversations, real tool results
 │   ├── finetune.py       Stage 2: instruction tuning, assistant-only loss
 │   └── instruct_eval.py  Held-out evaluation of the tuned model
 ├── engines/            WHAT RUNS A MODEL
@@ -432,10 +447,15 @@ Contributor rules — including the standard for training data — are in
 **Minerva** היא חברת מודלי AI. השם על שם האלה הרומית של החוכמה והמלאכה — לא של
 הכוח הגס. זו בדיוק הטענה: מערכת טובה נמדדת בדיוק ובמלאכה, לא בגודל.
 
-**Swift-Instruct** הוא שלב שני: אותו מודל, שאומן על 185 שיחות שנכתבו ביד, ולמד
-פורמט שיחה והפעלת כלים. הוא **באמת מפעיל כלים** — 91.2% דיוק בהחלטה אם להפעיל
-כלי ו-94.4% בבחירת הכלי — אבל רק 16.7% בארגומנטים. חשיבה אומנה, נמדדה, **וכובתה**
-(על הבסיס הישן; לא נמדד מחדש על הבסיס הדו-לשוני). כל המספרים בתיעוד.
+**Swift-Instruct** הוא שלב שני: אותו מודל, שאומן על 219 שיחות שנכתבו ביד —
+185 באנגלית ו-**34 בעברית**, שנוספו בסבב נפרד, כל אחת נכתבה בנפרד, בלי תבנית
+ובלי סקריפט. הוא **באמת מפעיל כלים בשתי השפות** — 97.1% דיוק בניתוב באנגלית,
+80.0% בעברית. הפתעה אמיתית: הוספת עברית לא פגעה באנגלית — היא **שיפרה** אותה
+בחזרה לרמת v0.1.0 (ניתוב 91.2%→97.1%, סירוב כן 50%→66.7%). אבל העברית עצמה
+עדיין חלשה יותר: **0% סירוב כן בעברית** — שני מקרי הבדיקה שדרשו "אני לא יודע"
+קיבלו תשובה שגויה במקום סירוב. זה סבב ראשון ומדוד, לא יכולת גמורה — המספרים
+המלאים, כולל החולשה, בתיעוד. חשיבה אומנה, נמדדה, **וכובתה** (על הבסיס הישן;
+לא נמדד מחדש על הבסיס הדו-לשוני).
 
 **Swift** הוא המודל הראשון, על שם הסיס — ציפור של כארבעים גרם שמבלה כמעט את כל
 חייה באוויר ואינה נאלצת לנחות. הוא **אומן מאפס בתוך הפרויקט הזה**: הארכיטקטורה,

@@ -34,11 +34,17 @@ into the training text. The only exceptions are the clock examples, whose
 output depends on the wall clock; those carry an explicit ``result`` and are
 marked ``pinned=True``.
 
-**Size.** ~160 examples. That is small on purpose: it is what one person can
-actually read and stand behind, and per `CLAUDE.md` a hundred considered
-examples beat a hundred thousand generated ones. It is enough to teach a format
-and a routing habit. It is *not* enough to teach knowledge, and this file does
-not pretend otherwise.
+**Size.** 185 English + 34 Hebrew. That is small on purpose: it is what one
+person can actually read and stand behind, and per `CLAUDE.md` a hundred
+considered examples beat a hundred thousand generated ones. It is enough to
+teach a format and a routing habit, in either language. It is *not* enough to
+teach knowledge, and this file does not pretend otherwise.
+
+**Hebrew (added after v0.2.0's pretraining corpus added Hebrew).** 34
+examples, section 8 below, deliberately smaller and more direct-answer-heavy
+than the English set - see that section's own comment for why. This is a
+first, measured round, not a claim that Hebrew is as well covered as English:
+it is not, and the held-out numbers in `docs/TRAINING.md` say so.
 """
 
 from __future__ import annotations
@@ -967,6 +973,176 @@ _REBALANCE: tuple[InstructExample, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# 8. Hebrew. Swift v0.2.0's pretraining corpus added curated Hebrew literature
+#    (docs/TRAINING.md, S1) - the base model can write grammatical Hebrew, but
+#    had never seen a Hebrew turn boundary, a Hebrew tool call, or a Hebrew
+#    refusal. These teach the same three things S1-6 teach in English: open
+#    with the assistant marker and stop at <|end|>, route arithmetic and dates
+#    to a tool without being told to, and say "I do not know" in Hebrew rather
+#    than invent an answer just because the language changed.
+#
+#    Register is ordinary spoken Hebrew, not the corpus's literary register -
+#    matching every English example here, which is conversational, not
+#    Austen. Tool names and arguments stay in their real form (calculate's
+#    expressions are math notation, current_time's zones are IANA names,
+#    days_between's dates are ISO) - none of that is language-dependent, only
+#    the surrounding sentence is.
+#
+#    Deliberately smaller and more direct-answer-heavy than a first English
+#    round would be: S6b's own history shows a 34-example, tool-heavy addition
+#    swinging honest refusal from 50% to 17% in a single round on an *already
+#    well-balanced* set. Adding a second language to an already-thin
+#    185-example budget is a second version of exactly that risk, so this
+#    round leans away from tool calls rather than toward them (14 tool-routing
+#    examples against 20 that answer directly or decline) and is written to be
+#    measured before any larger Hebrew round is written on top of it.
+# ---------------------------------------------------------------------------
+
+_HEBREW: tuple[InstructExample, ...] = (
+    # -- Calculator, in Hebrew --------------------------------------------
+    InstructExample(
+        user="כמה זה 17 כפול 43?",
+        call=("calculate", {"expression": "17 * 43"}),
+        answer="17 כפול 43 זה 731.",
+    ),
+    InstructExample(
+        user="חשב 2847 חלקי 13.",
+        call=("calculate", {"expression": "2847 / 13"}),
+        answer="2847 חלקי 13 זה 219.",
+    ),
+    InstructExample(
+        user="כמה זה 1999 ועוד 2024?",
+        call=("calculate", {"expression": "1999 + 2024"}),
+        answer="יוצא 4023.",
+    ),
+    InstructExample(
+        user="מה זה 144 פחות 89?",
+        call=("calculate", {"expression": "144 - 89"}),
+        answer="144 פחות 89 זה 55.",
+    ),
+    InstructExample(
+        user="9 בריבוע.",
+        call=("calculate", {"expression": "9 ** 2"}),
+        answer="9 בריבוע זה 81.",
+    ),
+    InstructExample(
+        user="מה השורש הריבועי של 576?",
+        call=("calculate", {"expression": "sqrt(576)"}),
+        answer="השורש הריבועי של 576 הוא 24.",
+    ),
+    InstructExample(
+        user="תן לי 15 אחוז מ-240.",
+        call=("calculate", {"expression": "240 * 0.15"}),
+        answer="15 אחוז מ-240 זה 36.",
+    ),
+    InstructExample(
+        user="ספר עולה 34 שקלים. כמה יעלו 7 עותקים?",
+        call=("calculate", {"expression": "34 * 7"}),
+        answer="שבעה עותקים יעלו 238 שקלים.",
+    ),
+    InstructExample(
+        user="כמה זה 2 בחזקת 10?",
+        call=("calculate", {"expression": "2 ** 10"}),
+        answer="2 בחזקת 10 זה 1024.",
+    ),
+    InstructExample(
+        user="כפול 125 ב-8.",
+        call=("calculate", {"expression": "125 * 8"}),
+        answer="125 כפול 8 זה 1000.",
+    ),
+    # -- Clock and dates, in Hebrew -----------------------------------------
+    InstructExample(
+        user="מה התאריך היום?",
+        call=("current_time", {"timezone": "UTC"}),
+        result="2026-03-14 09:41:02 (Saturday) in UTC [UTC+00:00]",
+        pinned=True,
+        answer="היום יום שבת, 14 במרץ 2026.",
+    ),
+    InstructExample(
+        user="מה השעה בירושלים?",
+        call=("current_time", {"timezone": "Asia/Jerusalem"}),
+        result="2026-03-14 11:41:02 (Saturday) in Asia/Jerusalem [UTC+02:00]",
+        pinned=True,
+        answer="השעה בירושלים היא 11:41.",
+    ),
+    InstructExample(
+        user="איזה יום בשבוע היום?",
+        call=("current_time", {"timezone": "UTC"}),
+        result="2026-03-14 09:41:02 (Saturday) in UTC [UTC+00:00]",
+        pinned=True,
+        answer="היום יום שבת.",
+    ),
+    InstructExample(
+        user="כמה ימים יש בין 2026-01-01 ל-2026-03-01?",
+        call=("days_between", {"start_date": "2026-01-01", "end_date": "2026-03-01"}),
+        answer="יש 59 ימים בין התאריכים האלה.",
+    ),
+    # -- Ordinary conversation, no tool --------------------------------------
+    InstructExample(user="שלום.", answer="שלום. איך אפשר לעזור?"),
+    InstructExample(user="בוקר טוב.", answer="בוקר טוב."),
+    InstructExample(user="תודה רבה.", answer="בבקשה."),
+    InstructExample(user="להתראות.", answer="להתראות."),
+    InstructExample(
+        user="מי אתה?",
+        answer="אני Swift, המודל הקטן במשפחת Minerva.",
+    ),
+    InstructExample(user="מה השם שלך?", answer="השם שלי הוא Swift."),
+    InstructExample(
+        user="מה אתה יכול לעשות?",
+        answer="אני יכול לענות על שאלות קצרות, ולהשתמש במחשבון ובשעון כשצריך.",
+    ),
+    InstructExample(
+        user="האם אתה מודל גדול?",
+        answer="לא. אני מודל קטן, בערך עשרה מיליון פרמטרים.",
+    ),
+    InstructExample(
+        user="תכתוב לי חיבור ארוך.",
+        answer="לא. אני קטן וההקשר שלי קצר, אז אני עונה בקצרה.",
+    ),
+    InstructExample(user="כמה ימים יש בשבוע?", answer="שבעה."),
+    InstructExample(user="כמה חודשים יש בשנה?", answer="שנים עשר."),
+    InstructExample(user="מה בא אחרי יום רביעי?", answer="יום חמישי."),
+    # -- Reasoning without a tool, in Hebrew ----------------------------------
+    InstructExample(
+        user="אם היום יום רביעי, איזה יום יהיה בעוד יומיים?",
+        think="יום רביעי ועוד יום זה יום חמישי, ועוד יום זה יום שישי.",
+        answer="יהיה יום שישי.",
+    ),
+    InstructExample(
+        user="יש לי שלושה תפוחים ואני אוכל אחד. אחר כך אני קונה שניים. כמה יש לי?",
+        think="שלוש פחות אחד זה שתיים, ועוד שניים זה ארבע.",
+        answer="יש לך ארבעה תפוחים.",
+    ),
+    InstructExample(
+        user="מה כבד יותר, קילו ברזל או קילו נוצות?",
+        think="שניהם קילו אחד; ההבדל הוא בנפח, לא במשקל.",
+        answer="שניהם שווים במשקל.",
+    ),
+    # -- Honest ignorance, in Hebrew ------------------------------------------
+    InstructExample(
+        user="מי ניצח במונדיאל 2022?",
+        answer="אני לא יודע. אני מודל קטן ולא אומנתי על אירועים עדכניים.",
+    ),
+    InstructExample(
+        user="מה מזג האוויר היום?",
+        answer="אני לא יכול לדעת. אין לי גישה למידע על מזג אוויר.",
+    ),
+    InstructExample(
+        user="מה השם שלי?",
+        answer="אני לא יודע את השם שלך. לא אמרת לי אותו.",
+    ),
+    InstructExample(
+        user="מה יקרה מחר?",
+        answer="אין לי דרך לדעת את זה.",
+    ),
+    InstructExample(
+        user="כמה אנשים גרים בטוקיו?",
+        answer="אני לא בטוח במספר הזה, אז מעדיף לא לנחש.",
+    ),
+)
+
+
 #: Every hand-written example, in one tuple.
 INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_CALCULATOR,
@@ -978,6 +1154,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_UNKNOWN,
     *_REBALANCE,
     *_MULTI_TURN,
+    *_HEBREW,
 )
 
 

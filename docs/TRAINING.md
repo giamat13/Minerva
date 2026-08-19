@@ -516,9 +516,10 @@ feed an invented result back as though a tool had produced it.
 
 ### The data
 
-**185 conversations, every one written by hand.** No script, no templates, no
-permuted slot values — `CLAUDE.md` forbids all three, and this is where that
-rule bites hardest.
+**185 English conversations, every one written by hand** (34 more in Hebrew,
+added in v0.2.0 — see below). No script, no templates, no permuted slot
+values — `CLAUDE.md` forbids all three, and this is where that rule bites
+hardest.
 
 **Tool results are never fabricated**: an example declares the *call*, and the
 build executes the real tool to get the result that goes into the text. Only
@@ -576,40 +577,82 @@ The evaluation uses greedy decoding deliberately: with sampling, the same
 checkpoint scored 94.4% and 83.3% tool accuracy on two seeds, and a number that
 swings eleven points with the random seed cannot support a claim.
 
-### v0.2.0: the same 185 examples, retrained on the bilingual base
+### v0.2.0, round one: the same 185 examples, retrained on the bilingual base
 
 `swift-instruct` is a fine-tune of `swift`, so when the base model's weights
 changed (§5b), `swift-instruct` was retrained too — otherwise the shipped
 "instruct" model would silently be a fine-tune of a checkpoint no longer in
-the catalogue. **No Hebrew examples were added** — the same 185
+the catalogue. The first retrain added **no Hebrew examples** — the same 185
 English-only conversations, unchanged, on the new base:
 
-| | v0.1.0 base | v0.2.0 base (+ Hebrew) |
+| | v0.1.0 base | v0.2.0 base, 185 English only |
 |---|---|---|
 | format valid | 100.0% | 100.0% |
-| routing accuracy | 94.1% | **91.2%** |
-| tool name accuracy | 88.9% | **94.4%** |
-| argument accuracy | 27.8% | **16.7%** |
-| final answer correct | 31.2% | **18.8%** |
-| honest refusal | 66.7% | **50.0%** |
+| routing accuracy | 94.1% | 91.2% |
+| tool name accuracy | 88.9% | 94.4% |
+| argument accuracy | 27.8% | 16.7% |
+| final answer correct | 31.2% | 18.8% |
+| honest refusal | 66.7% | 50.0% |
 
 Mixed, and mostly worse. Tool name accuracy improved, but routing, arguments,
 final answers and honest refusal all fell — a real, measured downstream cost
 of §5b's pretraining trade-off: the base model's English competence itself
 regressed (bits/byte 1.3571 → 1.4678), and a fine-tune built on a weaker base
-produces a weaker fine-tune, on the *identical* 185 examples.
+produces a weaker fine-tune, on the *identical* 185 examples. This is also
+why Hebrew examples were not added in this first retrain: 185 hand-written
+conversations was already a fragile budget for one language — this
+document's own three-round history (§8, above) shows a 34-example addition
+swinging honest refusal from 50% to 17% in a single round — and doubling
+down on a base whose English had just measurably weakened seemed like the
+wrong moment to also split the budget across two languages.
 
-This is why Hebrew examples were **not** added to `swift-instruct` in this
-round, despite that being worth considering explicitly: 185 hand-written
-conversations was already a fragile budget for one language — TRAINING.md's
-own three-round history above shows a 34-example addition swinging honest
-refusal from 50% to 17% in a single round. Splitting an already-thin budget
-across two languages, on a base model whose English just measurably weakened,
-is very likely to make both languages' instruction-following worse rather than
-adding a real capability. The responsible next step is to first see whether a
-larger or longer pretraining run recovers the English regression, and only
-then spend hand-written effort on Hebrew conversations — themselves written
-one at a time, never generated, per `CLAUDE.md`.
+### v0.2.0, round two: 34 hand-written Hebrew examples added
+
+Requested explicitly, and worth doing properly rather than deferring
+indefinitely: 34 Hebrew conversations, written by hand one at a time exactly
+like every other example in this file (never generated, never a template
+over slot values — `instruct_data.py` §8 has the full rationale), covering
+the same categories as the English set — calculator and date routing,
+ordinary conversation, short reasoning, honest refusal — deliberately
+leaning *away* from tool calls (14 tool-routing examples against 20 that
+answer directly or decline) given §8's rebalancing history. `INSTRUCT_EXAMPLES`
+grew from 185 to **219**.
+
+The held-out evaluation set grew to match: 10 new Hebrew prompts in
+`instruct_eval.py`, hand-written, with different numbers, dates and phrasings
+from every Hebrew training example — the same "near but not in the training
+distribution" standard the English 34 prompts already met. Scored separately
+by language, greedy decoding, same methodology as every other number in this
+document:
+
+| | v0.2.0, 185 English only | v0.2.0, +34 Hebrew — English cases | v0.2.0, +34 Hebrew — Hebrew cases |
+|---|---|---|---|
+| held-out cases | 34 | 34 | 10 |
+| format valid | 100.0% | 97.1% | 100.0% |
+| routing accuracy | 91.2% | **97.1%** | 80.0% |
+| tool name accuracy | 94.4% | 94.4% | 83.3% |
+| argument accuracy | 16.7% | **22.2%** | 16.7% |
+| final answer correct | 18.8% | 18.8% | 20.0% |
+| honest refusal | 50.0% | **66.7%** | 0.0% |
+
+A genuine surprise: adding Hebrew examples did not further dilute English —
+it **recovered** most of round one's English regression (routing 91.2% →
+97.1%, refusal 50.0% → 66.7%, back to v0.1.0's level). The most plausible
+reading is that 34 more examples, in either language, is simply more
+signal for the one-token routing decision and the refusal habit than 185
+alone carried, and that habit transfers across the language boundary because
+it is largely about *when* to act, not what language the prompt was in.
+
+Hebrew itself is real but weaker, and this is reported plainly rather than
+rounded up: routing (80.0%) and tool name accuracy (83.3%) are decent for a
+first round on 34 examples, but **honest refusal on Hebrew is 0%** — both
+Hebrew refusal cases in the held-out set got a wrong or garbled answer
+instead of a decline, one of them in English despite being asked in Hebrew.
+Five Hebrew refusal examples out of 34 is little to learn a habit from, and
+it shows. This is a first, measured round, not a finished capability — the
+honest next step is more hand-written Hebrew examples specifically in the
+refusal category, written and measured the same way, not assumed to already
+work because the average numbers above look reasonable.
 
 ### Thinking was trained, measured, and switched off
 

@@ -10,7 +10,9 @@ training prompts would measure memorisation and report it as capability, which
 The prompts are deliberately *near* the training distribution but not in it -
 different numbers, different verbs, different phrasings. That is the honest
 question for a model this size: not "can it recite" but "does the habit
-generalise one step".
+generalise one step". The same holds for the ten Hebrew cases added alongside
+instruct_data.py's Hebrew training section: different numbers, different
+dates, different phrasings from every Hebrew training example.
 
 What is measured
 ----------------
@@ -92,6 +94,19 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("How many people live in Tokyo?", None, expects_refusal=True),
     EvalCase("Write me a complete database engine.", None, expects_refusal=True),
     EvalCase("Translate 'good night' into Korean.", None, expects_refusal=True),
+    # -- Hebrew: different numbers, dates and phrasings from every Hebrew
+    #    training example in instruct_data.py's section 8 - same "near but not
+    #    in the training distribution" standard as the English cases above.
+    EvalCase("כמה זה 23 כפול 19?", "calculate", "437"),
+    EvalCase("תוסיף 314 ל-159.", "calculate", "473"),
+    EvalCase("מה זה 630 חלקי 9?", "calculate", "70"),
+    EvalCase("12 בריבוע.", "calculate", "144"),
+    EvalCase("מה השעה בלונדון?", "current_time"),
+    EvalCase("כמה ימים יש בין 2026-02-01 ל-2026-02-28?", "days_between", "27"),
+    EvalCase("ערב טוב.", None),
+    EvalCase("איך קוראים לך?", None),
+    EvalCase("מי המנכ״ל של החברה?", None, expects_refusal=True),
+    EvalCase("מה מחיר המניה של אפל היום?", None, expects_refusal=True),
 )
 
 _REFUSAL_MARKERS = (
@@ -104,6 +119,14 @@ _REFUSAL_MARKERS = (
     "not confident",
     "would rather not",
     "do not remember",
+    # Hebrew equivalents, for the Hebrew eval cases above. Hebrew has no case
+    # distinction, so the .lower() call in evaluate_instruct is a harmless
+    # no-op on these.
+    "לא יודע",
+    "אין לי",
+    "לא יכול",
+    "לא בטוח",
+    "מעדיף לא",
 )
 
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")

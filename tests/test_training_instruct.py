@@ -167,6 +167,10 @@ class TestEvalSetIsHeldOut:
             "What is 11 squared?": 11**2,
             "What is 5 factorial?": 120,
             "What is 2 to the power of 10?": 2**10,
+            "כמה זה 23 כפול 19?": 23 * 19,
+            "תוסיף 314 ל-159.": 314 + 159,
+            "מה זה 630 חלקי 9?": 630 // 9,
+            "12 בריבוע.": 12**2,
         }
         for case in EVAL_CASES:
             if case.prompt in known:
