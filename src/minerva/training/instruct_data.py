@@ -19,20 +19,29 @@ would have been trivial to emit ten thousand `f"What is {a} + {b}?"` rows.
 3. *When NOT to reach for a tool.* Roughly as many examples answer directly as
    call a tool. Without that balance a small model learns "always call the
    calculator", which is worse than no tool use at all.
-4. *Saying "I don't know".* Swift was pretrained on 27 MB of 19th-century
-   novels and 1987 newswire. It does not know current facts, and confident
-   invention is the failure mode most worth training against.
+4. *Saying "I don't know" - and, since v0.3.0, searching instead when a search
+   can actually help.* Swift's pretraining corpus no longer includes
+   encyclopedic or news content (see `training/data.py` for why: a
+   9.9M-parameter model cannot hold facts reliably, only confabulate them
+   fluently), so a question about a stable fact, a current event or a live
+   number routes to ``web_search`` rather than being invented. What stays a
+   flat refusal is anything no tool fixes - the model's own memory of this
+   conversation, a capability it genuinely lacks (writing code, translating),
+   or a request it should decline regardless of what a search would turn up
+   (medical advice). Section 6b below is the searchable half of what used to
+   be one large "I don't know" section; section 6 is what remains of it.
 
 **What was deliberately left out:** long-form answers (the context is 512
 tokens), multi-tool chains (too much to learn from a set this size), and any
 factual question whose answer the model cannot plausibly have learned - those
-are taught as "I don't know" instead.
+are taught as "I don't know" or a `web_search` call instead.
 
 **Tool results are never fabricated.** An example declares the *call*, and
 :func:`build_examples` executes the real tool to obtain the result that goes
-into the training text. The only exceptions are the clock examples, whose
-output depends on the wall clock; those carry an explicit ``result`` and are
-marked ``pinned=True``.
+into the training text. The exceptions are the clock examples, whose output
+depends on the wall clock, and the web_search examples, whose output depends
+on the live web; both carry an explicit ``result`` and are marked
+``pinned=True`` so the training set stays reproducible.
 
 **Size.** 185 English + 34 Hebrew. That is small on purpose: it is what one
 person can actually read and stand behind, and per `CLAUDE.md` a hundred
@@ -570,40 +579,12 @@ _THINKING_NO_TOOL: tuple[InstructExample, ...] = (
 
 _UNKNOWN: tuple[InstructExample, ...] = (
     InstructExample(
-        user="Who won the World Cup in 2022?",
-        answer="I do not know. I am a small model and I was not trained on recent events.",
-    ),
-    InstructExample(
-        user="What is the population of Brazil?",
-        answer="I do not know that figure, and I would rather not guess.",
-    ),
-    InstructExample(
-        user="What is the current price of gold?",
-        answer="I cannot know that. I have no access to live prices.",
-    ),
-    InstructExample(
-        user="Who is the prime minister right now?",
-        answer="I do not know. My training data does not cover current office holders.",
-    ),
-    InstructExample(
-        user="What is the weather today?",
-        answer="I cannot tell you. I have no weather data.",
-    ),
-    InstructExample(
-        user="Summarise the news from this morning.",
-        answer="I cannot. I have no access to today's news.",
-    ),
-    InstructExample(
         user="What is my name?",
         answer="I do not know your name. You have not told me.",
     ),
     InstructExample(
         user="What did we talk about last week?",
         answer="I do not remember previous conversations.",
-    ),
-    InstructExample(
-        user="How tall is the tallest building in the world?",
-        answer="I am not confident of that figure, so I would rather not state one.",
     ),
     InstructExample(
         user="Explain quantum chromodynamics in detail.",
@@ -625,10 +606,123 @@ _UNKNOWN: tuple[InstructExample, ...] = (
         user="Give me medical advice about my headache.",
         answer="I am not able to give medical advice. Please ask a doctor.",
     ),
+)
+
+
+# ---------------------------------------------------------------------------
+# 6b. Questions about the world Swift was never trained to know - encyclopedic
+#    facts and current events were deliberately removed from the pretraining
+#    corpus (see training/data.py), because a 9.9M-parameter model cannot
+#    reliably store them, only imitate their register while confabulating the
+#    content. web_search is the honest alternative to both inventing an
+#    answer and refusing outright: look it up, then answer from what came
+#    back. Every result below is pinned - a live search is not reproducible,
+#    exactly like the clock examples above and for the same reason.
+# ---------------------------------------------------------------------------
+
+_WEB_SEARCH: tuple[InstructExample, ...] = (
+    InstructExample(
+        user="Who won the World Cup in 2022?",
+        think="This is a specific past event, not something I was trained on. I should look it up.",
+        call=("web_search", {"query": "World Cup 2022 winner"}),
+        result=(
+            "2022 FIFA World Cup - Wikipedia\n"
+            "https://en.wikipedia.org/wiki/2022_FIFA_World_Cup\n"
+            "Argentina were crowned champions after beating France on penalties "
+            "in the final, held in Qatar."
+        ),
+        pinned=True,
+        answer="Argentina won the 2022 World Cup, beating France on penalties in the final.",
+    ),
+    InstructExample(
+        user="What is the population of Brazil?",
+        call=("web_search", {"query": "population of Brazil"}),
+        result=(
+            "Brazil Population (Live) - Worldometer\n"
+            "https://www.worldometers.info/world-population/brazil-population/\n"
+            "The current population of Brazil is approximately 216 million."
+        ),
+        pinned=True,
+        answer="A search shows Brazil's population at around 216 million.",
+    ),
+    InstructExample(
+        user="What is the current price of gold?",
+        think="Prices change constantly, so I need to search rather than recall a number.",
+        call=("web_search", {"query": "current price of gold per ounce"}),
+        result=(
+            "Gold Price Today - Kitco\n"
+            "https://www.kitco.com/charts/gold\n"
+            "Spot gold is trading at $2,385.40 per troy ounce."
+        ),
+        pinned=True,
+        answer=(
+            "A search shows spot gold at about $2,385 per ounce, though prices "
+            "move constantly so check a live source for the exact figure."
+        ),
+    ),
+    InstructExample(
+        user="Who is the prime minister of the United Kingdom right now?",
+        call=("web_search", {"query": "prime minister of the United Kingdom"}),
+        result=(
+            "Prime Minister of the United Kingdom - GOV.UK\n"
+            "https://www.gov.uk/government/history/past-prime-ministers\n"
+            "Keir Starmer has served as Prime Minister since July 2024."
+        ),
+        pinned=True,
+        answer="A search shows Keir Starmer as the Prime Minister of the United Kingdom.",
+    ),
+    InstructExample(
+        user="What is the weather like in London today?",
+        call=("web_search", {"query": "London weather today"}),
+        result=(
+            "London Weather - BBC Weather\n"
+            "https://www.bbc.co.uk/weather/2643743\n"
+            "Overcast with light rain, high of 14C."
+        ),
+        pinned=True,
+        answer="A search shows overcast skies with light rain in London, high around 14C.",
+    ),
+    InstructExample(
+        user="How tall is the tallest building in the world?",
+        call=("web_search", {"query": "tallest building in the world"}),
+        result=(
+            "Burj Khalifa - Wikipedia\n"
+            "https://en.wikipedia.org/wiki/Burj_Khalifa\n"
+            "The Burj Khalifa in Dubai stands 828 metres tall, the tallest "
+            "building in the world since 2010."
+        ),
+        pinned=True,
+        answer="The Burj Khalifa in Dubai is the tallest building in the world, at 828 metres.",
+    ),
     InstructExample(
         user="What is the capital of France?",
-        think="This is a fact I may have seen, but I am a very small model and I am not confident.",
-        answer="I believe it is Paris, though I am a small model and can be wrong.",
+        think=(
+            "This is a stable fact, but I was not trained on encyclopedic "
+            "knowledge, so I should check rather than guess."
+        ),
+        call=("web_search", {"query": "capital of France"}),
+        result=(
+            "France - Wikipedia\n"
+            "https://en.wikipedia.org/wiki/France\n"
+            "Paris is the capital and most populous city of France."
+        ),
+        pinned=True,
+        answer="Paris is the capital of France.",
+    ),
+    InstructExample(
+        user="Summarise the news from this morning.",
+        call=("web_search", {"query": "today's top news headline"}),
+        result=(
+            "Reuters World News\n"
+            "https://www.reuters.com/world/\n"
+            "See the latest developments across politics, business and world "
+            "affairs, updated continuously."
+        ),
+        pinned=True,
+        answer=(
+            "A search only turned up a live news index, not a specific summary "
+            "- try a news site directly for this morning's actual headlines."
+        ),
     ),
 )
 
@@ -1121,14 +1215,6 @@ _HEBREW: tuple[InstructExample, ...] = (
     ),
     # -- Honest ignorance, in Hebrew ------------------------------------------
     InstructExample(
-        user="מי ניצח במונדיאל 2022?",
-        answer="אני לא יודע. אני מודל קטן ולא אומנתי על אירועים עדכניים.",
-    ),
-    InstructExample(
-        user="מה מזג האוויר היום?",
-        answer="אני לא יכול לדעת. אין לי גישה למידע על מזג אוויר.",
-    ),
-    InstructExample(
         user="מה השם שלי?",
         answer="אני לא יודע את השם שלך. לא אמרת לי אותו.",
     ),
@@ -1136,9 +1222,42 @@ _HEBREW: tuple[InstructExample, ...] = (
         user="מה יקרה מחר?",
         answer="אין לי דרך לדעת את זה.",
     ),
+    # -- Web search, in Hebrew: world facts Swift was never trained to know,
+    #    now looked up instead of refused or invented - see the English
+    #    _WEB_SEARCH section above for why. Pinned for the same reason as the
+    #    clock examples: a live search is not reproducible.
+    InstructExample(
+        user="מי ניצח במונדיאל 2022?",
+        call=("web_search", {"query": "מי ניצח במונדיאל 2022"}),
+        result=(
+            "מונדיאל 2022 - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/מונדיאל_2022\n"
+            "נבחרת ארגנטינה זכתה באליפות לאחר ניצחון בעונשין על צרפת בגמר, שנערך בקטאר."
+        ),
+        pinned=True,
+        answer="לפי חיפוש, ארגנטינה ניצחה במונדיאל 2022, אחרי ניצחון בעונשין על צרפת בגמר.",
+    ),
+    InstructExample(
+        user="מה מזג האוויר היום?",
+        call=("web_search", {"query": "מזג אוויר היום"}),
+        result=(
+            "מזג האוויר היום - רשות המטאורולוגיה\n"
+            "https://ims.gov.il/he/forecast\n"
+            "בהיר עד מעונן חלקית, טמפרטורות בין 18 ל-27 מעלות."
+        ),
+        pinned=True,
+        answer="לפי חיפוש, היום בהיר עד מעונן חלקית, עם טמפרטורות בין 18 ל-27 מעלות.",
+    ),
     InstructExample(
         user="כמה אנשים גרים בטוקיו?",
-        answer="אני לא בטוח במספר הזה, אז מעדיף לא לנחש.",
+        call=("web_search", {"query": "אוכלוסיית טוקיו"}),
+        result=(
+            "אוכלוסיית טוקיו - Worldometer\n"
+            "https://www.worldometers.info/world-population/japan-population/\n"
+            "אוכלוסיית מטרופולין טוקיו עומדת על כ-14 מיליון תושבים."
+        ),
+        pinned=True,
+        answer="לפי חיפוש, במטרופולין טוקיו גרים כ-14 מיליון תושבים.",
     ),
 )
 
@@ -1152,6 +1271,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_NO_TOOL,
     *_THINKING_NO_TOOL,
     *_UNKNOWN,
+    *_WEB_SEARCH,
     *_REBALANCE,
     *_MULTI_TURN,
     *_HEBREW,

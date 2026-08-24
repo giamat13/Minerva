@@ -39,6 +39,19 @@ considered examples**. Every example must be worth the tokens it costs.
 - ✅ Wrong, sloppy or ambiguous examples are **deleted**, not "cleaned up
   later". One bad example teaches a bad habit that a hundred good ones must
   then unteach.
+- ✅ **A model must always be able to say "I don't know."** This is the most
+  important habit any Minerva model is taught, more important than any single
+  fact. Confabulation — stating a wrong answer with the same confidence as a
+  right one — is a worse failure than refusing, because a refusal is visibly
+  honest and a wrong answer is not. Every instruct set needs real, hand-written
+  examples of admitting ignorance, and — for anything a tool could actually
+  resolve (a current fact, a live number, an event) — real examples of
+  reaching for that tool instead of guessing or flatly refusing. See
+  `src/minerva/training/instruct_data.py`'s `_UNKNOWN` and `_WEB_SEARCH`
+  sections for the pattern: a flat "I don't know" only for what no tool can
+  fix (the model's own memory of this conversation, a capability it genuinely
+  lacks, a request it should decline regardless of the facts); a tool call for
+  everything else.
 
 ### The standard
 
@@ -216,6 +229,17 @@ ruff check . && mypy          # both must be clean before committing
 
 ---
 
+## 7. Git workflow
+
+- **Intermediate commits (no push) are fine.** Committing partway through a
+  multi-step change to checkpoint real, working progress is encouraged, not
+  something to ask permission for each time — it is a local, reversible
+  action. Pushing, force-pushing, and rewriting published history still need
+  the user's explicit go-ahead, per the general safety rules this project
+  otherwise follows.
+
+---
+
 ## הנחיות בעברית (תקציר)
 
 **אימונים — איכות בלבד.**
@@ -224,6 +248,14 @@ ruff check . && mypy          # both must be clean before committing
 דוגמאות שלא נקראו. מאה דוגמאות שחשבו עליהן שוות יותר ממאה אלף שסקריפט ייצר. אם
 אי אפשר להסביר למה דוגמה מסוימת נמצאת בדאטהסט — היא לא צריכה להיות שם. אותו כלל
 חל גם על סטים של הערכה (eval).
+
+**הכי חשוב: המודל תמיד צריך לדעת להגיד "אני לא יודע".** זו ההרגל הכי חשוב
+שמודל של Minerva לומד — יותר חשוב מכל עובדה בודדת. תשובה שגויה שנאמרת בביטחון
+כאילו היא נכונה גרועה יותר מסירוב, כי סירוב הוא כן באופן גלוי ותשובה שגויה
+לא. כל סט אימונים חייב דוגמאות אמיתיות וכתובות ביד של הודאה באי־ידיעה, וגם —
+לכל דבר שכלי יכול בפועל לפתור (עובדה עדכנית, מספר חי, אירוע) — דוגמאות של
+פנייה לאותו כלי במקום ניחוש או סירוב סתמי. ראו את `_UNKNOWN` ו-`_WEB_SEARCH`
+ב-`src/minerva/training/instruct_data.py`.
 
 **בלי קיצורי דרך.**
 רק קוד אמיתי שרץ. אין Mocks, אין תשובות מזויפות, אין דמה, אין `TODO` במקום
@@ -243,3 +275,8 @@ Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טק�
 `supports_thinking`) ובתיעוד. אסור לפרסם יכולת שהמשקולות לא באמת מספקות ולתת
 לקוד לכסות על זה. כשמתגלה באג — כותבים אותו, את ההשפעה המדודה ואת ההחלטה
 שהתקבלה, ולא מתקנים בשקט.
+
+**קומיטים באמצע העבודה.**
+מותר וכדאי לעשות קומיט (בלי push) כדי לשמור התקדמות אמיתית ועובדת באמצע
+משימה מרובת שלבים, בלי לבקש אישור בכל פעם — זו פעולה מקומית והפיכה. Push,
+force-push ושינוי היסטוריה שפורסמה עדיין דורשים אישור מפורש מהמשתמש.

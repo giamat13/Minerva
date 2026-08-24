@@ -21,8 +21,9 @@ from __future__ import annotations
 from ..base import Tool
 from .calculator import calculate
 from .clock import current_time, days_between
+from .web_search import web_search
 
-__all__ = ["builtin_tools", "calculate", "current_time", "days_between"]
+__all__ = ["builtin_tools", "calculate", "current_time", "days_between", "web_search"]
 
 # The canonical list of built-in tools. Order is irrelevant; the registry
 # sorts by name when it hands specs to an engine.
@@ -30,6 +31,7 @@ _BUILTIN_TOOLS: tuple[Tool, ...] = (
     calculate,
     current_time,
     days_between,
+    web_search,
 )
 
 

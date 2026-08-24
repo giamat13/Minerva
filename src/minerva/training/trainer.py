@@ -305,12 +305,18 @@ class Trainer:
                 elapsed = time.time() - step_started
                 mean_loss = window_loss / window_steps
                 throughput = tokens_per_step * window_steps / elapsed
+                # ETA from the current window's pace, not the run-wide average,
+                # so it tracks real slowdowns (e.g. eval/checkpoint pauses)
+                # instead of smearing them across the whole remaining estimate.
+                seconds_per_step = elapsed / window_steps
+                eta_min = (cfg.max_steps - self.state.step) * seconds_per_step / 60
                 print(
                     f"  step {self.state.step:5d}/{cfg.max_steps}  "
                     f"loss {mean_loss:6.4f}  ppl {math.exp(min(20, mean_loss)):8.2f}  "
                     f"lr {lr:.2e}  |g| {grad_norm:5.2f}  "
                     f"{throughput:6.0f} tok/s  "
-                    f"{(time.time() - started) / 60:5.1f}m"
+                    f"{(time.time() - started) / 60:5.1f}m elapsed  "
+                    f"eta {eta_min:5.1f}m"
                 )
                 self._log(
                     {

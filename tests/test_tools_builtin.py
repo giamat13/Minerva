@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from minerva.errors import ToolExecutionError
-from minerva.tools.builtin import builtin_tools, calculate, current_time, days_between
+from minerva.tools.builtin import builtin_tools, calculate, current_time, days_between, web_search
 
 
 class TestCalculatorArithmetic:
@@ -173,6 +173,25 @@ class TestDaysBetween:
     def test_bad_dates_are_refused(self) -> None:
         with pytest.raises(ToolExecutionError, match="not a valid ISO date"):
             days_between.invoke({"start_date": "yesterday", "end_date": "2026-01-01"})
+
+
+@pytest.mark.integration
+class TestWebSearch:
+    """Real network calls against DuckDuckGo's HTML search - no mocks."""
+
+    def test_finds_real_results(self) -> None:
+        result = web_search.invoke({"query": "python programming language", "max_results": 3})
+        assert "python.org" in result.lower() or "python" in result.lower()
+        # Each result is title/url/snippet, blocks separated by a blank line.
+        assert len(result.split("\n\n")) <= 3
+
+    def test_max_results_is_respected(self) -> None:
+        result = web_search.invoke({"query": "python programming language", "max_results": 1})
+        assert len(result.split("\n\n")) == 1
+
+    def test_empty_query_is_refused(self) -> None:
+        with pytest.raises(ToolExecutionError, match="must not be empty"):
+            web_search.invoke({"query": "   "})
 
 
 class TestBuiltinCatalogue:

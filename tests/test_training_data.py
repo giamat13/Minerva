@@ -19,8 +19,6 @@ from minerva.training.data import (
     _clean_europarl,
     _clean_generic,
     _clean_gutenberg,
-    _clean_reuters,
-    _clean_wikipedia,
 )
 
 
@@ -41,13 +39,21 @@ class TestSourceCatalogue:
     def test_the_corpus_mixes_registers(self) -> None:
         # A single-register corpus produces a single-register model.
         names = {source.name for source in SOURCES}
-        assert {"gutenberg", "reuters"} <= names, "literature and newswire are the backbone"
+        assert {"gutenberg", "benyehuda"} <= names, "literature is the backbone, in two languages"
         assert len(names) >= 4, "at least four distinct registers"
 
     def test_degraded_corpora_are_not_included(self) -> None:
         names = {source.name for source in SOURCES}
         assert "brown" not in names, "POS-tagged text was rejected on quality grounds"
         assert "movie_reviews" not in names, "lowercased pre-tokenised text was rejected"
+
+    def test_general_knowledge_and_event_sources_are_not_included(self) -> None:
+        # v0.3.0: a 9.9M-parameter model cannot reliably hold facts, only
+        # imitate their register while confabulating the content. web_search
+        # is the honest substitute - see the module docstring in data.py.
+        names = {source.name for source in SOURCES}
+        assert "wikipedia_simple_en" not in names, "encyclopedic general knowledge was removed"
+        assert "reuters" not in names, "newswire event reporting was removed"
 
 
 class TestGenericCleaner:
@@ -80,23 +86,6 @@ class TestGutenbergCleaner:
         assert "[and looked up]" in _clean_gutenberg(raw)
 
 
-class TestReutersCleaner:
-    def test_the_shouting_headline_is_dropped(self) -> None:
-        raw = "BAHIA COCOA REVIEW\n  Showers continued throughout the week."
-        cleaned = _clean_reuters(raw)
-        assert "BAHIA COCOA REVIEW" not in cleaned
-        assert "Showers continued" in cleaned
-
-    def test_a_mixed_case_first_line_is_kept(self) -> None:
-        raw = "Showers continued this week.\n  More detail follows."
-        assert "Showers continued" in _clean_reuters(raw)
-
-    def test_hard_wrapped_lines_are_rejoined_into_paragraphs(self) -> None:
-        raw = "HEADLINE\n  The dry period means\n  some plantations would\n  harvest later."
-        cleaned = _clean_reuters(raw)
-        assert "\n" not in cleaned.strip(), f"wrapping survived: {cleaned!r}"
-
-
 class TestEuroparlCleaner:
     def test_sgml_speaker_tags_are_removed(self) -> None:
         raw = "<SPEAKER ID=1 NAME=President>\nI declare the session resumed."
@@ -123,49 +112,6 @@ class TestBenyehudaCleaner:
         # should trigger a cut.
         raw = "הוא דן בפרשנות של את הטקסט המקראי לעומק."
         assert _clean_benyehuda(raw) == raw.strip()
-
-
-class TestWikipediaCleaner:
-    def test_a_references_section_is_cut(self) -> None:
-        raw = "The sturgeon lives in the river.\n\nReferences\n\n1. A citation."
-        cleaned = _clean_wikipedia(raw)
-        assert "References" not in cleaned
-        assert cleaned == "The sturgeon lives in the river."
-
-    def test_bare_category_tags_after_the_section_are_cut_too(self) -> None:
-        raw = (
-            "Intel released the chip in 2006.\n\nOther websites\nIntel Core Duo\n\n"
-            "Computer hardware\nIntel Core processors"
-        )
-        cleaned = _clean_wikipedia(raw)
-        assert cleaned == "Intel released the chip in 2006."
-
-    def test_a_trailing_space_before_the_newline_is_still_matched(self) -> None:
-        # A real dump had "References \n" - a stray space before the
-        # newline that a naive "\nReferences\n" pattern misses entirely.
-        raw = "Iraq has suffered from extremism.\n\nReferences \n\nNationalism"
-        cleaned = _clean_wikipedia(raw)
-        assert "Nationalism" not in cleaned
-        assert cleaned == "Iraq has suffered from extremism."
-
-    def test_a_leading_space_before_the_header_is_still_matched(self) -> None:
-        # A real dump had " Related pages \n" - padded on both sides, likely
-        # from a footnote marker immediately before the heading.
-        raw = "Banksy's street art is well known.\n\n Related pages \n Homage to Banksy"
-        cleaned = _clean_wikipedia(raw)
-        assert "Related pages" not in cleaned
-        assert cleaned == "Banksy's street art is well known."
-
-    def test_an_empty_section_at_the_very_end_with_no_trailing_newline(self) -> None:
-        # A real dump ended exactly on "...\n\nReferences" - end of string,
-        # no newline after the header at all.
-        raw = "Waterfowl make their home in the region.\n\nReferences"
-        cleaned = _clean_wikipedia(raw)
-        assert cleaned == "Waterfowl make their home in the region."
-
-    def test_an_article_with_no_tail_section_is_left_alone(self) -> None:
-        raw = "A short article with no references section at all."
-        assert _clean_wikipedia(raw) == raw
 
 
 class TestChunking:

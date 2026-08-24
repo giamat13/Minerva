@@ -20,6 +20,9 @@ coverage.xml
 .vscode/
 .DS_Store
 
+# Session-local task tracking, not project documentation.
+TODO.md
+
 # Local, machine-specific configuration (never commit endpoints/secrets).
 minerva.local.toml
 .env

@@ -87,13 +87,17 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("Make this upper case: quiet please", None),
     EvalCase("What comes after Saturday?", None),
     EvalCase("Spell the word cat backwards.", None),
-    # -- should decline rather than invent -----------------------------------
-    EvalCase("Who is the president of Brazil?", None, expects_refusal=True),
-    EvalCase("What is the stock price of Apple today?", None, expects_refusal=True),
-    EvalCase("What happened in the news yesterday?", None, expects_refusal=True),
-    EvalCase("How many people live in Tokyo?", None, expects_refusal=True),
+    # -- should decline rather than invent: no tool fixes these ---------------
     EvalCase("Write me a complete database engine.", None, expects_refusal=True),
     EvalCase("Translate 'good night' into Korean.", None, expects_refusal=True),
+    # -- should search rather than invent or refuse: web_search can resolve
+    #    these, and CLAUDE.md's honesty rule says a tool call beats a guess
+    #    or a flat refusal when one is available. Different facts and
+    #    phrasings from every _WEB_SEARCH training example in instruct_data.py.
+    EvalCase("Who is the president of Brazil?", "web_search"),
+    EvalCase("What is the stock price of Apple today?", "web_search"),
+    EvalCase("What happened in the news yesterday?", "web_search"),
+    EvalCase("How many people live in Tokyo?", "web_search"),
     # -- Hebrew: different numbers, dates and phrasings from every Hebrew
     #    training example in instruct_data.py's section 8 - same "near but not
     #    in the training distribution" standard as the English cases above.
@@ -106,7 +110,7 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("ערב טוב.", None),
     EvalCase("איך קוראים לך?", None),
     EvalCase("מי המנכ״ל של החברה?", None, expects_refusal=True),
-    EvalCase("מה מחיר המניה של אפל היום?", None, expects_refusal=True),
+    EvalCase("מה מחיר המניה של אפל היום?", "web_search"),
 )
 
 _REFUSAL_MARKERS = (

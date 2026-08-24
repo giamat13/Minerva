@@ -34,14 +34,25 @@ kind of decision `CLAUDE.md` asks for explicitly:
   literature does.
 * **Full English Wikipedia (`wikimedia/wikipedia`, ``20231101.en``)** - 6.4M
   articles, tens of gigabytes. Nobody could read a representative sample of
-  that and vouch for it. Simple English Wikipedia is used instead: the same
-  distributor, the same licence, a size that can actually be reviewed, and a
-  further quality filter and a bounded, reproducible sample on top (see
-  `_iter_wikipedia_texts`).
+  that and vouch for it.
 
 None of these are *bad* text, exactly; they are text this project could not
 honestly claim to have read and stand behind at the volume they come in.
 Volume was not a good enough reason to include any of them.
+
+Removed in v0.3.0: encyclopedic and news content
+--------------------------------------------------
+Two sources that *were* in the corpus - Simple English Wikipedia (encyclopedic
+general knowledge) and Reuters newswire (event reporting) - were removed, not
+for a quality reason but a capability one: Swift is 9.9M parameters. It has
+nowhere to reliably store "the capital of X" or "what happened on date Y", and
+training on text whose whole point is dense factual claims does not give it
+that capacity - it gives it fluent confabulation, a model that states wrong
+facts exactly as confidently as right ones. That is worse than not knowing.
+The honest fix is not more parameters; it is not asking the weights to be a
+fact database at all. `minerva.tools.builtin.web_search` is the replacement:
+a real tool, so the model looks a fact up instead of guessing at one it was
+never big enough to remember correctly.
 """
 
 from __future__ import annotations
@@ -86,7 +97,7 @@ class CorpusSource:
     #: default) downloads `url` as a zip and globs `patterns` inside it - see
     #: `_iter_source_texts`. A source that cannot be selected by filename glob
     #: alone gets its own kind and iterator function instead, dispatched in
-    #: `build_corpus` - see `_iter_benyehuda_texts` and `_iter_wikipedia_texts`.
+    #: `build_corpus` - see `_iter_benyehuda_texts`.
     kind: str = "archive"
 
 
@@ -110,18 +121,6 @@ SOURCES: tuple[CorpusSource, ...] = (
             "corpus - long-form, carefully edited, correctly typeset English."
         ),
         cleaner="gutenberg",
-    ),
-    CorpusSource(
-        name="reuters",
-        url=f"{_NLTK_BASE}/reuters.zip",
-        patterns=("reuters/training/*", "reuters/test/*"),
-        licence="Reuters-21578, Distribution 1.0 - free for research use",
-        origin="Reuters newswire (1987), via the NLTK data distribution",
-        description=(
-            "Newswire: factual, dense, present-tense reporting. Balances the "
-            "literary sources with contemporary declarative prose."
-        ),
-        cleaner="reuters",
     ),
     CorpusSource(
         name="webtext",
@@ -161,30 +160,6 @@ SOURCES: tuple[CorpusSource, ...] = (
             "sentences that none of the other sources supply."
         ),
         cleaner="europarl",
-    ),
-    CorpusSource(
-        name="wikipedia_simple_en",
-        url=(
-            "https://huggingface.co/datasets/wikimedia/wikipedia/resolve/"
-            "b04c8d1ceb2f5cd4588862100d08de323dccfbaa/20231101.simple/"
-            "train-00000-of-00001.parquet"
-        ),
-        patterns=(),  # parquet, selected by _iter_wikipedia_texts, not a glob
-        licence="CC BY-SA 3.0 and GFDL",
-        origin=(
-            "Simple English Wikipedia, 2023-11-01 dump - wikimedia/wikipedia "
-            "revision b04c8d1 on Hugging Face"
-        ),
-        description=(
-            "Encyclopedic reference prose: explanatory, third-person, built "
-            "around a defined topic rather than a narrative or an argument - "
-            "a register none of the other English sources supply. A random, "
-            "reproducible sample of full articles (stubs and 'List of ...' "
-            "pages excluded), not the whole 157 MB dump - see "
-            "_iter_wikipedia_texts for why."
-        ),
-        cleaner="wikipedia",
-        kind="wikipedia",
     ),
     CorpusSource(
         name="benyehuda",
@@ -326,59 +301,6 @@ def _iter_benyehuda_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str
             yield zf.read(name).decode("utf-8")
 
 
-#: Below this many raw characters, a Wikipedia article is almost always a
-#: stub - a sentence or two, not a representative sample of the register.
-_WIKIPEDIA_MIN_RAW_CHARS = 1500
-_WIKIPEDIA_EXCLUDED_TITLE_PREFIXES = ("List of", "Lists of")
-#: Sampled to roughly this many raw characters - the scale of this corpus's
-#: other sources, not the scale of Wikipedia. Measured before the tail-strip
-#: cleaner runs, so the corpus's actual contribution comes out a bit lower.
-_WIKIPEDIA_SAMPLE_CHARS = 6_500_000
-
-
-def _iter_wikipedia_texts(source: CorpusSource, cache_dir: Path, seed: int) -> Iterator[str]:
-    """Download one Wikimedia Wikipedia parquet dump and reproducibly sample it.
-
-    A full-language dump runs from hundreds of megabytes (Simple English) to
-    tens of gigabytes (English) - downloading one wholesale would dwarf every
-    other source and could not plausibly be "read" per source, the way
-    `CLAUDE.md` requires. This keeps only substantive articles (stubs and
-    "List of ..." pages excluded, since those are barely prose) and samples
-    them down, with the same seed the corpus split itself uses, to roughly
-    this corpus's scale rather than Wikipedia's.
-    """
-    import pyarrow.parquet as pq
-
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    target = cache_dir / f"{source.name}.parquet"
-    if not (target.exists() and target.stat().st_size > 0):
-        print(f"  downloading {source.name} from {source.url}")
-        with urllib.request.urlopen(source.url, timeout=300) as response:
-            payload = response.read()
-        target.write_bytes(payload)
-        print(f"  {source.name}: {len(payload) / 1e6:.2f} MB")
-
-    table = pq.read_table(target, columns=["title", "text"])
-    titles = table.column("title").to_pylist()
-    texts = table.column("text").to_pylist()
-
-    candidates = [
-        i
-        for i, (title, text) in enumerate(zip(titles, texts, strict=True))
-        if len(text) >= _WIKIPEDIA_MIN_RAW_CHARS
-        and not title.startswith(_WIKIPEDIA_EXCLUDED_TITLE_PREFIXES)
-    ]
-    rng = random.Random(seed)
-    rng.shuffle(candidates)
-
-    total = 0
-    for i in candidates:
-        if total >= _WIKIPEDIA_SAMPLE_CHARS:
-            break
-        yield texts[i]
-        total += len(texts[i])
-
-
 # ---------------------------------------------------------------------------
 # Cleaning
 #
@@ -406,20 +328,6 @@ def _clean_gutenberg(text: str) -> str:
     return _clean_generic(_GUTENBERG_HEADER.sub("", text))
 
 
-def _clean_reuters(text: str) -> str:
-    # Every article opens with an ALL-CAPS headline on its own line. Keeping it
-    # would teach the model that sentences routinely shout; the body is the
-    # part worth learning.
-    lines = text.split("\n")
-    if lines and lines[0].strip() and lines[0].strip() == lines[0].strip().upper():
-        lines = lines[1:]
-    # Reuters wraps at ~70 columns with leading indentation on continuation
-    # lines. Unwrap so paragraphs are real paragraphs.
-    body = "\n".join(line.strip() for line in lines)
-    body = re.sub(r"\n(?=[a-z,;])", " ", body)
-    return _clean_generic(body)
-
-
 def _clean_europarl(text: str) -> str:
     # Europarl carries <SPEAKER> / <CHAPTER> SGML tags on their own lines.
     return _clean_generic(_EUROPARL_TAG.sub("", text))
@@ -436,40 +344,15 @@ _BENYEHUDA_FOOTER = re.compile(
     re.DOTALL,
 )
 
-# A Wikipedia article's apparatus - References, Related pages, Other
-# websites, See also, and the bare category tags that follow them with no
-# header at all - is not prose. It is noun-phrase link titles, one per line.
-# Cut at the first such section; the category tags come after it and go too.
-# Headers are sometimes padded with spaces on both sides (e.g. " References
-# \n", seen on articles with an inline footnote marker right before the
-# heading) - the [ \t]* on each side absorbs that. And an empty section is
-# sometimes the last thing in the article, with no trailing newline at all
-# (e.g. "...home in the region.\n\nReferences" then end of string) - (?:\n|\Z)
-# accepts end-of-string as well as a following newline.
-_WIKIPEDIA_TAIL_SECTIONS = re.compile(
-    r"\n[ \t]*(?:References|Related pages|Other websites|See also|Further reading|"
-    r"Bibliography|External links|Notes)[ \t]*(?:\n|\Z)"
-)
-
-
 def _clean_benyehuda(text: str) -> str:
     return _clean_generic(_BENYEHUDA_FOOTER.sub("", text))
-
-
-def _clean_wikipedia(text: str) -> str:
-    match = _WIKIPEDIA_TAIL_SECTIONS.search(text)
-    if match:
-        text = text[: match.start()]
-    return _clean_generic(text)
 
 
 _CLEANERS = {
     "generic": _clean_generic,
     "gutenberg": _clean_gutenberg,
-    "reuters": _clean_reuters,
     "europarl": _clean_europarl,
     "benyehuda": _clean_benyehuda,
-    "wikipedia": _clean_wikipedia,
 }
 
 # A document shorter than this after cleaning is almost always a stub, a stray
@@ -528,9 +411,7 @@ def build_corpus(
 
     The split is held out **per source and by character count**, so the
     validation set carries every register in the same proportion as training
-    and no chunk straddles the boundary. Splitting by document count instead
-    would hand validation almost entirely to Reuters, which contributes 8,578
-    of the corpus's documents but only a quarter of its text.
+    and no chunk straddles the boundary.
 
     Returns a manifest describing exactly what was built - it is written next
     to the corpus as ``manifest.json`` and is the provenance record
@@ -549,9 +430,7 @@ def build_corpus(
 
     for source in SOURCES:
         raw_texts: Iterator[str]
-        if source.kind == "wikipedia":
-            raw_texts = _iter_wikipedia_texts(source, cache_dir, seed)
-        elif source.kind == "benyehuda":
+        if source.kind == "benyehuda":
             raw_texts = _iter_benyehuda_texts(source, cache_dir)
         else:
             archive = download_source(source, cache_dir)
@@ -639,6 +518,18 @@ def build_corpus(
             "wikipedia_full_en": (
                 "6.4M articles, tens of GB; too large to review - used the "
                 "'simple' config, sampled and filtered, instead"
+            ),
+            "wikipedia_simple_en": (
+                "removed in v0.3.0: a 9.9M-parameter model cannot reliably "
+                "retain encyclopedic facts, only imitate their register while "
+                "confabulating the content. web_search gives Swift a way to "
+                "look facts up instead of memorizing them wrong."
+            ),
+            "reuters": (
+                "removed in v0.3.0: news content teaches specific, dated "
+                "real-world events as if they were stable facts to recite. "
+                "web_search is the honest substitute - current events belong "
+                "in a lookup, not in frozen weights."
             ),
         },
     }

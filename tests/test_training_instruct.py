@@ -61,15 +61,31 @@ class TestDatasetIntegrity:
         assert 0.7 < ratio < 1.4, f"{with_tool} tool vs {without} no-tool is unbalanced"
 
     def test_it_teaches_refusal(self) -> None:
+        # Honest ignorance is taught two ways since v0.3.0: a flat refusal for
+        # what no tool can fix, and a web_search call for what a search
+        # actually could - see CLAUDE.md's "must always be able to say I
+        # don't know" rule. Both count: the point being measured is that
+        # confabulation is trained against, not which of the two mechanisms
+        # handles a given question.
         refusals = [
             e
             for e in INSTRUCT_EXAMPLES
             if any(
                 marker in e.answer.lower()
-                for marker in ("do not know", "cannot", "not able", "would rather not")
+                for marker in (
+                    "do not know",
+                    "cannot",
+                    "not able",
+                    "would rather not",
+                    "לא יודע",
+                    "אין לי",
+                    "לא יכול",
+                )
             )
         ]
-        assert len(refusals) >= 20, "too few examples teaching honest ignorance"
+        web_searches = [e for e in INSTRUCT_EXAMPLES if e.call and e.call[0] == "web_search"]
+        assert len(web_searches) >= 8, "too few examples teaching search-instead-of-guessing"
+        assert len(refusals) + len(web_searches) >= 20, "too few examples teaching honest ignorance"
 
     def test_every_answer_is_non_empty(self) -> None:
         for example in INSTRUCT_EXAMPLES:
@@ -112,11 +128,14 @@ class TestToolResultsAreReal:
         assert checked > 40, "expected many tool examples to be verified"
 
     def test_pinned_examples_declare_their_result(self) -> None:
-        # Only the clock may pin, because its output depends on the wall clock.
+        # Only the clock and web_search may pin: the clock's output depends on
+        # the wall clock, and web_search's depends on the live web - neither
+        # is reproducible, unlike calculate/days_between which always return
+        # the same result for the same arguments.
         for example in INSTRUCT_EXAMPLES:
             if example.pinned:
                 assert example.result
-                assert example.call and example.call[0] == "current_time"
+                assert example.call and example.call[0] in ("current_time", "web_search")
 
     def test_stated_answers_agree_with_the_real_tool_output(self) -> None:
         """A wrong worked example teaches a wrong habit."""
@@ -153,7 +172,10 @@ class TestEvalSetIsHeldOut:
     def test_it_covers_tools_and_direct_answers_and_refusals(self) -> None:
         assert any(c.expects_tool for c in EVAL_CASES)
         assert any(c.expects_tool is None and not c.expects_refusal for c in EVAL_CASES)
-        assert sum(1 for c in EVAL_CASES if c.expects_refusal) >= 5
+        # Since v0.3.0, most "should decline" cases became "should search"
+        # instead - a flat refusal remains only for what no tool fixes.
+        assert sum(1 for c in EVAL_CASES if c.expects_refusal) >= 2
+        assert sum(1 for c in EVAL_CASES if c.expects_tool == "web_search") >= 4
 
     def test_expected_values_are_arithmetically_right(self) -> None:
         # The eval's own answers must be correct, or it scores the model
