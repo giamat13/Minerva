@@ -20,6 +20,7 @@ from minerva.training.data import (
     _clean_europarl,
     _clean_generic,
     _clean_gutenberg,
+    _clean_gutenberg_extended,
 )
 
 
@@ -89,6 +90,23 @@ class TestGutenbergCleaner:
         raw = "He paused [and looked up] before speaking."
         assert "[and looked up]" in _clean_gutenberg(raw)
 
+    def test_the_licence_footer_some_nltk_copies_carry_is_removed(self) -> None:
+        """A real leak, pre-existing since v0.1.0, found by a whole-corpus scan.
+
+        NLTK's copies are *mostly* pre-stripped, but the Chesterton files
+        still carried an END marker and the foundation's donation address
+        behind it. Small, but it is licence boilerplate, not prose.
+        """
+        raw = (
+            "[The Ball and The Cross by G.K. Chesterton]\n"
+            "Real prose here.\n"
+            "*** END OF THE PROJECT GUTENBERG EBOOK THE BALL AND THE CROSS ***\n"
+            "Project Gutenberg Literary Archive Foundation PMB 113\n"
+        )
+        cleaned = _clean_gutenberg(raw)
+        assert cleaned == "Real prose here."
+        assert "Literary Archive Foundation" not in cleaned
+
 
 class TestEuroparlCleaner:
     def test_sgml_speaker_tags_are_removed(self) -> None:
@@ -96,6 +114,65 @@ class TestEuroparlCleaner:
         cleaned = _clean_europarl(raw)
         assert "<SPEAKER" not in cleaned
         assert "I declare the session resumed." in cleaned
+
+
+class TestGutenbergExtendedCleaner:
+    """The licence header/footer is identical across all 119 books.
+
+    Leaving it in would teach the model to recite the Project Gutenberg
+    licence, which is the single most repeated text in the whole source.
+    """
+
+    RAW = (
+        "The Project Gutenberg eBook of Frankenstein\n"
+        "This eBook is for the use of anyone anywhere... Terms apply.\n"
+        "*** START OF THE PROJECT GUTENBERG EBOOK FRANKENSTEIN ***\n"
+        "You will rejoice to hear that no disaster has accompanied.\n"
+        "*** END OF THE PROJECT GUTENBERG EBOOK FRANKENSTEIN ***\n"
+        "Updated editions will replace the previous one - redistribution terms.\n"
+    )
+
+    def test_the_licence_header_and_footer_are_removed(self) -> None:
+        cleaned = _clean_gutenberg_extended(self.RAW)
+        assert cleaned == "You will rejoice to hear that no disaster has accompanied."
+        assert "Terms apply" not in cleaned
+        assert "redistribution terms" not in cleaned
+        assert "PROJECT GUTENBERG EBOOK" not in cleaned
+
+    def test_the_end_marker_is_found_after_the_header_is_trimmed(self) -> None:
+        """A stale offset here would silently keep the whole licence footer.
+
+        The end marker is located in the original string, but the header trim
+        shifts every index - so it has to be re-found on the trimmed text.
+        """
+        long_header = "The Project Gutenberg eBook of X\n" + ("boilerplate line\n" * 400)
+        raw = (
+            long_header
+            + "*** START OF THE PROJECT GUTENBERG EBOOK X ***\n"
+            + "Real prose lives here.\n"
+            + "*** END OF THE PROJECT GUTENBERG EBOOK X ***\n"
+            + ("licence tail\n" * 200)
+        )
+        cleaned = _clean_gutenberg_extended(raw)
+        assert cleaned == "Real prose lives here."
+        assert "licence tail" not in cleaned
+
+    def test_transcriber_apparatus_is_dropped(self) -> None:
+        raw = (
+            "*** START OF THE PROJECT GUTENBERG EBOOK X ***\n"
+            "Produced by Jane Volunteer and the Online Team\n\n"
+            "Call me Ishmael.\n"
+            "*** END OF THE PROJECT GUTENBERG EBOOK X ***\n"
+        )
+        cleaned = _clean_gutenberg_extended(raw)
+        assert "Produced by" not in cleaned
+        assert cleaned == "Call me Ishmael."
+
+    def test_a_text_with_no_markers_survives(self) -> None:
+        # Not every Gutenberg file is marked; dropping such a book entirely
+        # would be worse than keeping its text as-is.
+        raw = "A plain paragraph with no Gutenberg markers at all."
+        assert _clean_gutenberg_extended(raw) == raw
 
 
 class TestBrownCleaner:
@@ -147,6 +224,22 @@ class TestBenyehudaCleaner:
         assert "הפיקו מתנדבי" not in cleaned
         assert "benyehuda.org" not in cleaned
         assert cleaned == "שָׁלוֹם רָב שׁוּבֵךְ, צִפֹּרָה נֶחְמֶדֶת"
+
+    def test_html_entities_and_footnote_arrows_are_removed(self) -> None:
+        """Found by scanning the whole built corpus, not by reading code.
+
+        Ben-Yehuda's plain-text release carries some of its HTML pipeline
+        through: the v0.4.0 rebuild contained 9,832 literal `&nbsp;` and
+        9,429 `↩︎` footnote-return arrows. A model trained on markup writes
+        markup, so both are stripped.
+        """
+        raw = "שלום רב&nbsp;↩︎ עולם &amp; עוד."
+        cleaned = _clean_benyehuda(raw)
+        assert "&nbsp;" not in cleaned
+        assert "&amp;" not in cleaned
+        assert "↩" not in cleaned
+        assert "\xa0" not in cleaned, "a non-breaking space is still whitespace, but not a space"
+        assert cleaned == "שלום רב  עולם & עוד."
 
     def test_the_word_text_in_ordinary_prose_is_not_a_false_match(self) -> None:
         # "את הטקסט" ("the text") is ordinary Hebrew, not just the credit

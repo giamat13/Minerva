@@ -85,6 +85,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import random
 import re
 import sys
@@ -147,6 +148,26 @@ SOURCES: tuple[CorpusSource, ...] = (
             "corpus - long-form, carefully edited, correctly typeset English."
         ),
         cleaner="gutenberg",
+    ),
+    CorpusSource(
+        name="gutenberg_extended",
+        url="https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt",
+        patterns=(),  # selected by id, see _iter_gutenberg_extended_texts
+        licence="Public domain (Project Gutenberg licence stripped with the header)",
+        origin=(
+            "Project Gutenberg, fetched per-book by ebook id from "
+            "gutenberg.org - 119 curated titles, see _GUTENBERG_EXTENDED_IDS"
+        ),
+        description=(
+            "The volume that makes fluency possible: 119 canonical English "
+            "books across novels, gothic, detective, adventure, early science "
+            "fiction, children's literature, essays, philosophy, drama and "
+            "translated classics. Chosen for register diversity rather than "
+            "raw size, verified to resolve and de-duplicated against the 18 "
+            "books the `gutenberg` source above already ships."
+        ),
+        cleaner="gutenberg_extended",
+        kind="gutenberg_ids",
     ),
     CorpusSource(
         name="brown",
@@ -299,12 +320,225 @@ def _matches(name: str, pattern: str) -> bool:
 #: his translations and correspondence) down to 2.9 MB of his own poetry,
 #: articles and prose. Across all seven, the same filter is the difference
 #: between a ~40 MB pull of the whole catalogue and a 17.6 MB curated one.
-_BENYEHUDA_AUTHOR_IDS = frozenset({"p89", "p141", "p66", "p23", "p44", "p57", "p142"})
+#: Ben-Yehuda person-ids for the curated authors. Expanded in v0.4.0 from
+#: seven to thirty-five, all of them **modern** Hebrew writers (Haskalah and
+#: the Hebrew revival onward, roughly 1850+).
+#:
+#: The exclusion that matters: Ben-Yehuda's largest contributors by work count
+#: are medieval poets - Samuel HaNagid (p49, 1,856 works), Ibn Gabirol (p180),
+#: Judah Halevi (p161), Abraham and Moses Ibn Ezra (p20, p170), Shalom Shabazi
+#: (p146). They are real, canonical Hebrew, and they are deliberately left out:
+#: 11th-17th century liturgical and courtly verse is to modern conversational
+#: Hebrew roughly what Chaucer is to spoken English. Swift is meant to hold a
+#: conversation, so the corpus buys modern register rather than raw volume,
+#: even though including them would have more than doubled the Hebrew side.
+_BENYEHUDA_AUTHOR_IDS = frozenset(
+    {
+        # The original seven (v0.2.0).
+        "p89",    # Bialik
+        "p141",   # Rachel Bluwstein
+        "p66",    # Brenner
+        "p23",    # Ahad Ha'am
+        "p44",    # Mendele Mocher Sforim
+        "p57",    # Tchernichovsky
+        "p142",   # Frishman
+        # Added v0.4.0 - modern poetry, prose, essays and journalism.
+        "p609",   # Yehuda Karni
+        "p440",   # Yitzhak Katzenelson
+        "p55",    # Berl Katznelson
+        "p1274",  # Asher Barash
+        "p388",   # Yaakov Steinberg
+        "p46",    # Y. L. Gordon
+        "p78",    # David Vogel
+        "p111",   # A. Z. Rabinovitz
+        "p503",   # Yitzhak Lufban
+        "p115",   # Menachem Mivashan
+        "p1449",  # Yaakov Klatzkin
+        "p164",   # Berdyczewski
+        "p904",   # David Remez
+        "p726",   # Chaim Lensky
+        "p814",   # Fania Bergstein
+        "p181",   # Moshe Beilinson
+        "p720",   # Shlomo Mandelkern
+        "p135",   # Moshe Glickson
+        "p1975",  # David Smilansky
+        "p117",   # Yehuda Steinberg
+        "p1367",  # Zvi Hirsch Masliansky
+        "p30",    # Aharon Liebushitzky
+        "p123",   # Yeshayahu Karniel
+        "p24",    # Alter Druyanov
+        "p32",    # Itamar Ben-Avi
+        "p155",   # Y. L. Peretz
+        "p41",    # Naftali Herz Imber
+        "p87",    # Azriel Nathan Frank
+    }
+)
 _BENYEHUDA_EXCLUDED_GENRE_SUBSTRINGS = ("letters", "reference")
+#: Project Gutenberg ebook ids for `gutenberg_extended`. Every one was
+#: fetched and checked before being written here (see the "Added in v0.4.0"
+#: note in the module docstring): the id resolves, the text is a real
+#: Gutenberg ebook of substantial length, and it is mostly-Latin script -
+#: Hebrew comes from Ben-Yehuda, not from here. Two candidates were caught
+#: and dropped by that check because they duplicated books the `gutenberg`
+#: source above already ships: id 1522 is Julius Caesar (NLTK has
+#: shakespeare-caesar) and id 19033 is Alice in Wonderland (NLTK has
+#: carroll-alice). Titles below are the ones Gutenberg itself reports, not
+#: the ones this file assumed.
+_GUTENBERG_EXTENDED_IDS: dict[int, str] = {
+    16: "Peter Pan",
+    27: "Far from the Madding Crowd",
+    33: "The Scarlet Letter",
+    35: "The Time Machine",
+    36: "The war of the worlds",
+    43: "The strange case of Dr. Jekyll and Mr. Hyde",
+    45: "Anne of Green Gables",
+    46: "A Christmas Carol in Prose; Being a Ghost Story of Christmas",
+    55: "The Wonderful Wizard of Oz",
+    74: "The Adventures of Tom Sawyer, Complete",
+    76: "Adventures of Huckleberry Finn",
+    77: "The House of the Seven Gables",
+    84: "Frankenstein; or, the modern prometheus",
+    86: "A Connecticut Yankee in King Arthur's Court",
+    98: "A Tale of Two Cities",
+    103: "Around the World in Eighty Days",
+    108: "The Return of Sherlock Holmes",
+    110: "Tess of the d'Urbervilles: A Pure Woman",
+    113: "The Secret Garden",
+    119: "A Tramp Abroad",
+    120: "Treasure Island",
+    121: "Northanger Abbey",
+    132: "The Art of War",
+    141: "Mansfield Park",
+    145: "Middlemarch",
+    155: "The Moonstone",
+    159: "The island of Doctor Moreau",
+    160: "The Awakening, and Selected Short Stories",
+    164: "Twenty Thousand Leagues under the Sea",
+    174: "The Picture of Dorian Gray",
+    203: "Uncle Tom's Cabin",
+    205: "Walden, and On The Duty Of Civil Disobedience",
+    209: "The Turn of the Screw",
+    215: "The call of the wild",
+    219: "Heart of Darkness",
+    236: "The Jungle Book",
+    244: "A Study in Scarlet",
+    284: "The House of Mirth",
+    289: "The Wind in the Willows",
+    345: "Dracula",
+    394: "Cranford",
+    421: "Kidnapped",
+    432: "The Ambassadors",
+    482: "The Woodlanders",
+    507: "Adam Bede",
+    514: "Little Women",
+    521: "The Life and Adventures of Robinson Crusoe",
+    526: "Heart of Darkness",
+    541: "The Age of Innocence",
+    550: "Silas Marner",
+    580: "The Pickwick Papers",
+    583: "The Woman in White",
+    599: "Vanity Fair",
+    600: "Notes from the Underground",
+    696: "The Castle of Otranto",
+    730: "Oliver Twist",
+    766: "David Copperfield",
+    768: "Wuthering Heights",
+    786: "Hard Times",
+    829: "Gulliver's Travels into Several Remote Nations of the World",
+    834: "The Memoirs of Sherlock Holmes",
+    844: "The Importance of Being Earnest: A Trivial Comedy for Serious People",
+    910: "White Fang",
+    963: "Little Dorrit",
+    967: "Nicholas Nickleby",
+    969: "The Tenant of Wildfell Hall",
+    974: "The Secret Agent: A Simple Tale",
+    996: "Don Quixote",
+    1023: "Bleak House",
+    1081: "Dead Souls",
+    1164: "The iron heel",
+    1184: "The Count of Monte Cristo",
+    1232: "The Prince",
+    1250: "Anthem",
+    1257: "The three musketeers",
+    1260: "Jane Eyre: An Autobiography",
+    1342: "Pride and Prejudice",
+    1399: "Anna Karenina",
+    1400: "Great Expectations",
+    1497: "The Republic",
+    1513: "Romeo and Juliet",
+    1526: "Twelfth Night",
+    1531: "Othello",
+    1661: "The Adventures of Sherlock Holmes",
+    1727: "The Odyssey",
+    1837: "The Prince and the Pauper",
+    1952: "The Yellow Wallpaper",
+    1998: "Thus Spake Zarathustra: A Book for All and None",
+    2005: "Piccadilly Jim",
+    2097: "The Sign of the Four",
+    2147: "The Works of Edgar Allan Poe - Volume 1",
+    2148: "The Works of Edgar Allan Poe - Volume 2",
+    2153: "Mary Barton",
+    2226: "Kim",
+    2413: "Madame Bovary",
+    2554: "Crime and Punishment",
+    2591: "Grimms' Fairy Tales",
+    2600: "War and Peace",
+    2638: "The Idiot",
+    2680: "Meditations",
+    2814: "Dubliners",
+    2833: "The Portrait of a Lady - Volume 1",
+    2852: "The Hound of the Baskervilles",
+    3207: "Leviathan",
+    3268: "The Mysteries of Udolpho",
+    3300: "An Inquiry into the Nature and Causes of the Wealth of Nations",
+    3600: "Essays of Michel de Montaigne - Complete",
+    4217: "A Portrait of the Artist as a Young Man",
+    4363: "Beyond Good and Evil",
+    4507: "As a man thinketh",
+    5200: "Metamorphosis",
+    5230: "The Invisible Man: A Grotesque Romance",
+    5658: "Lord Jim",
+    5827: "The Problems of Philosophy",
+    6130: "The Iliad",
+    7849: "The Trial",
+    8800: "The divine comedy",
+    18857: "A Journey to the Centre of the Earth",
+    28054: "The Brothers Karamazov",
+}
+
+
 _BENYEHUDA_CATALOGUE_URL = (
     "https://github.com/projectbenyehuda/public_domain_dump/releases/"
     "download/2026-03/pseudocatalogue.csv"
 )
+
+
+#: Sent on every Gutenberg request. gutenberg.org asks automated clients to
+#: identify themselves rather than pretend to be a browser.
+_GUTENBERG_UA = "Minerva/0.4 corpus build (github.com/giamat13/Minerva)"
+
+
+def _iter_gutenberg_extended_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
+    """Fetch each curated Gutenberg book by id, caching it on disk.
+
+    One file per book rather than one big archive, because Gutenberg has no
+    bulk endpoint for an arbitrary curated set - and because a per-book cache
+    means an interrupted build resumes instead of starting the whole download
+    again. A book that fails to download raises: a corpus quietly missing
+    a third of its text would still train, and would still be wrong.
+    """
+    books_dir = cache_dir / "gutenberg_extended"
+    books_dir.mkdir(parents=True, exist_ok=True)
+
+    for gid in sorted(_GUTENBERG_EXTENDED_IDS):
+        target = books_dir / f"pg{gid}.txt"
+        if not (target.exists() and target.stat().st_size > 0):
+            url = source.url.format(id=gid)
+            request = urllib.request.Request(url, headers={"User-Agent": _GUTENBERG_UA})
+            with urllib.request.urlopen(request, timeout=120) as response:
+                payload = response.read()
+            target.write_bytes(payload)
+        yield target.read_text(encoding="utf-8", errors="replace")
 
 
 def _iter_benyehuda_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
@@ -372,7 +606,43 @@ def _clean_generic(text: str) -> str:
 def _clean_gutenberg(text: str) -> str:
     # NLTK's copies carry a "[Emma by Jane Austen 1816]" line instead of the
     # full Gutenberg licence header. Drop it: it is metadata, not prose.
-    return _clean_generic(_GUTENBERG_HEADER.sub("", text))
+    #
+    # They are *mostly* pre-stripped of the licence, but not entirely: a
+    # whole-corpus scan after the v0.4.0 rebuild found the Chesterton files
+    # still carrying an "*** END OF THE PROJECT GUTENBERG EBOOK ... ***"
+    # footer and the foundation's donation address behind it. Small (a few
+    # KB) but real, and pre-existing since v0.1.0 - so the same footer strip
+    # the full-text source uses runs here too.
+    return _clean_generic(_strip_gutenberg_markers(_GUTENBERG_HEADER.sub("", text)))
+
+
+# A full Project Gutenberg ebook wraps the real text in a licence header and
+# footer, marked by these lines. Everything outside them is boilerplate -
+# identical across all 119 books, so leaving it in would teach the model to
+# recite the Gutenberg licence. NLTK's `gutenberg` source ships pre-stripped
+# copies, which is why it needs a different (much smaller) cleaner.
+_PG_START = re.compile(r"\*\*\* ?START OF TH[EIS]+ PROJECT GUTENBERG EBOOK.*?\*\*\*", re.S)
+_PG_END = re.compile(r"\*\*\* ?END OF TH[EIS]+ PROJECT GUTENBERG EBOOK.*?\*\*\*", re.S)
+#: Transcriber's notes and produced-by credits sit inside the markers but are
+#: apparatus, not prose.
+_PG_PRODUCED_BY = re.compile(r"^\s*(Produced by|E-?text prepared by|Transcribed from).*$", re.M)
+
+
+def _strip_gutenberg_markers(text: str) -> str:
+    """Cut everything outside the START/END licence markers, if present."""
+    start = _PG_START.search(text)
+    if start:
+        text = text[start.end() :]
+    # Searched *after* the header trim, not before: the trim shifts every
+    # offset, and reusing a stale one silently keeps the whole footer.
+    end = _PG_END.search(text)
+    if end:
+        text = text[: end.start()]
+    return text
+
+
+def _clean_gutenberg_extended(text: str) -> str:
+    return _clean_generic(_PG_PRODUCED_BY.sub("", _strip_gutenberg_markers(text)))
 
 
 def _clean_europarl(text: str) -> str:
@@ -429,13 +699,28 @@ _BENYEHUDA_FOOTER = re.compile(
     re.DOTALL,
 )
 
+# Ben-Yehuda's texts come out of an HTML pipeline, and some of that survives
+# into the plain-text release: a whole-corpus scan after the v0.4.0 rebuild
+# found 9,832 literal `&nbsp;` and 9,429 `↩︎` footnote-return arrows in the
+# Hebrew side. Only ~0.03% of the corpus by characters, but it is markup, and
+# a model that reads `&nbsp;` in its training text learns to write `&nbsp;`.
+# unescape() handles the named/numeric entities; the arrow and the resulting
+# non-breaking spaces are then normalised to ordinary spaces.
+_FOOTNOTE_RETURN = re.compile(r"[↩⏎]︎?️?")
+
+
 def _clean_benyehuda(text: str) -> str:
-    return _clean_generic(_BENYEHUDA_FOOTER.sub("", text))
+    text = _BENYEHUDA_FOOTER.sub("", text)
+    text = html.unescape(text)
+    text = _FOOTNOTE_RETURN.sub("", text)
+    text = text.replace("\xa0", " ")
+    return _clean_generic(text)
 
 
 _CLEANERS = {
     "generic": _clean_generic,
     "gutenberg": _clean_gutenberg,
+    "gutenberg_extended": _clean_gutenberg_extended,
     "brown": _clean_brown,
     "europarl": _clean_europarl,
     "benyehuda": _clean_benyehuda,
@@ -516,7 +801,9 @@ def build_corpus(
 
     for source in SOURCES:
         raw_texts: Iterator[str]
-        if source.kind == "benyehuda":
+        if source.kind == "gutenberg_ids":
+            raw_texts = _iter_gutenberg_extended_texts(source, cache_dir)
+        elif source.kind == "benyehuda":
             raw_texts = _iter_benyehuda_texts(source, cache_dir)
         else:
             archive = download_source(source, cache_dir)

@@ -1313,6 +1313,227 @@ _TALK_NATURALLY: tuple[InstructExample, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# 8c. Fluency round (v0.4.0). Everything above teaches *what* to do - route to
+#    a tool, decline honestly, answer briefly. This section teaches the model
+#    to sound like connected prose while doing it: replies of one to three
+#    real sentences instead of clipped fragments, reactions to news, follow-ups
+#    that track an earlier turn, and tool requests buried inside ordinary
+#    conversational phrasing ("I'm splitting a bill three ways") rather than
+#    stated as bare commands ("What is 342 / 3?").
+#
+#    Split deliberately into a no-tool half and a tool half of the same size.
+#    The dataset's tool/no-tool balance is load-bearing - this file's own
+#    history records a tool-heavy round dropping honest refusal from 50% to
+#    17% - and at 271 examples the ratio had only ~10 no-tool examples of slack
+#    left before the balance test would fail. Adding both halves together
+#    keeps the ratio where it was rather than spending that slack.
+# ---------------------------------------------------------------------------
+
+_FLUENT_NO_TOOL: tuple[InstructExample, ...] = (
+    # -- English: reacting, following up, keeping a thread ------------------
+    InstructExample(
+        user="I just got offered the job I applied for!",
+        answer="That is wonderful news. Congratulations, you must have impressed them.",
+    ),
+    InstructExample(
+        history=(
+            (
+                "Two companies made me offers. I have to decide by Friday.",
+                "That is a good position to be in. What are the differences?",
+            ),
+        ),
+        user="One pays more but has a long commute. The other is closer but lower pay.",
+        answer=(
+            "Both have trade-offs. The commute would eat time you could spend "
+            "elsewhere, but salary gives you security. What matters more to you "
+            "right now?"
+        ),
+    ),
+    InstructExample(
+        user="I'm sorry I'm asking so many questions.",
+        answer="Do not apologize. Questions are what I am here for.",
+    ),
+    InstructExample(
+        history=(("I've been learning to cook.", "That is interesting. What have you made?"),),
+        user="My first souffle actually didn't collapse this time.",
+        answer=(
+            "That is real progress. Souffles are finicky, so getting one to rise "
+            "is worth celebrating."
+        ),
+    ),
+    InstructExample(
+        user="I think I phrased that badly. What I meant was-",
+        answer="Take your time. I am listening.",
+    ),
+    InstructExample(
+        user="I studied all night and still bombed the test. What am I doing wrong?",
+        think=(
+            "Sleep loss before an exam hurts recall, so the all-nighter may be "
+            "the problem itself."
+        ),
+        answer=(
+            "Studying all night before a test makes it harder to remember what you "
+            "studied. You might do better studying less the night before and "
+            "sleeping properly."
+        ),
+    ),
+    InstructExample(
+        history=(
+            ("I'm planning a trip to Barcelona.", "That sounds lovely. When are you thinking?"),
+        ),
+        user="Actually, I just found cheaper flights for next month instead.",
+        answer=(
+            "A month away gives you more time to save and plan, so that might work "
+            "out better anyway."
+        ),
+    ),
+    InstructExample(
+        user="It's been a really long day and I'm just tired.",
+        answer="That sounds draining. I hope you get a proper rest tonight.",
+    ),
+    # -- Hebrew: the same widening, in modern everyday register --------------
+    InstructExample(
+        user="קיבלתי היום תשובה חיובית מהעבודה שרציתי.",
+        answer="מזל טוב! זה נשמע כמו חדשות ממש טובות. בטח חיכית לזה.",
+    ),
+    InstructExample(
+        history=(("אני מתחיל ללמוד גיטרה.", "נחמד. כמה זמן אתה כבר מנגן?"),),
+        user="בערך חודשיים. האצבעות עוד כואבות לי.",
+        answer="זה נורמלי בהתחלה. אחרי כמה שבועות העור מתקשה וזה כבר לא מציק.",
+    ),
+    InstructExample(
+        user="אני קצת לחוץ מהמבחן מחר.",
+        answer="זה מובן לגמרי. נסה לישון טוב הלילה, זה עוזר יותר מללמוד עוד שעה.",
+    ),
+    InstructExample(
+        user="סליחה, לא הסברתי את זה טוב.",
+        answer="אין בעיה. קח את הזמן, אני מקשיב.",
+    ),
+    InstructExample(
+        history=(("היה לי שבוע קשה בעבודה.", "נשמע מתיש. קרה משהו מסוים?"),),
+        user="בעיקר הרבה ישיבות ומעט זמן לעשות את העבודה עצמה.",
+        answer="זה תסכול מוכר. קשה להתקדם כשכל היום מתפצל לפגישות קצרות.",
+    ),
+    InstructExample(
+        user="סוף סוף סיימתי את הפרויקט שעבדתי עליו חודשיים.",
+        answer="כל הכבוד. חודשיים זה המון עבודה, מגיע לך להיות מרוצה.",
+    ),
+    InstructExample(
+        user="תודה שהקשבת, זה עזר לי.",
+        answer="בשמחה. אני שמח שזה עזר.",
+    ),
+    InstructExample(
+        user="אני לא בטוח שהבנתי את מה שאמרת קודם.",
+        answer="בוא ננסה שוב. על איזה חלק תרצה שאסביר יותר לאט?",
+    ),
+)
+
+
+_FLUENT_TOOL_USE: tuple[InstructExample, ...] = (
+    # Every calculate/days_between answer below states the result the real
+    # tool returns - checked by running the tool, not by eye. The clock and
+    # web_search examples are pinned, for the same non-reproducibility reason
+    # as every other pinned example in this file.
+    InstructExample(
+        user="We're splitting a 342 shekel dinner bill three ways, what do I owe?",
+        call=("calculate", {"expression": "342 / 3"}),
+        answer="Your share is 114 shekels.",
+    ),
+    InstructExample(
+        user="We drove 468 kilometres on 36 litres. How far did we get per litre?",
+        call=("calculate", {"expression": "468 / 36"}),
+        answer="That works out to 13 kilometres per litre.",
+    ),
+    InstructExample(
+        user="The recipe serves 4 and I'm cooking for 18. What do I multiply everything by?",
+        call=("calculate", {"expression": "18 / 4"}),
+        answer="Multiply every quantity by 4.5.",
+    ),
+    InstructExample(
+        user="I'm on 87 an hour and I worked 23 hours this week.",
+        call=("calculate", {"expression": "87 * 23"}),
+        answer="That comes to 2001 for the week.",
+    ),
+    InstructExample(
+        user="The hall seats 1250 and we've sold 875 tickets so far.",
+        think="They want the seats still unsold, which is the difference.",
+        call=("calculate", {"expression": "1250 - 875"}),
+        answer="You have 375 seats left to sell.",
+    ),
+    InstructExample(
+        user="My rent is 4200 a month and I'm trying to work out the yearly cost.",
+        call=("calculate", {"expression": "4200 * 12"}),
+        answer="That is 50400 a year.",
+    ),
+    InstructExample(
+        user="The bill came to 260 and I want to leave a 15 percent tip.",
+        call=("calculate", {"expression": "260 * 0.15"}),
+        answer="A 15 percent tip would be 39.",
+    ),
+    InstructExample(
+        user="The room is square, 7 metres on each side. How much flooring do I need?",
+        call=("calculate", {"expression": "7 ** 2"}),
+        answer="You need 49 square metres of flooring.",
+    ),
+    InstructExample(
+        user="Half of 936, off the top of your head?",
+        call=("calculate", {"expression": "936 / 2"}),
+        answer="Half of 936 is 468.",
+    ),
+    InstructExample(
+        user="I've got 3 boxes with 24 in each, plus 5 loose ones.",
+        call=("calculate", {"expression": "3 * 24 + 5"}),
+        answer="That is 77 altogether.",
+    ),
+    InstructExample(
+        user="96 pastries, 8 to a tray. How many trays?",
+        call=("calculate", {"expression": "96 / 8"}),
+        answer="You will need 12 trays.",
+    ),
+    InstructExample(
+        user="My course runs from 2026-01-15 to 2026-06-15. How long is that?",
+        call=("days_between", {"start_date": "2026-01-15", "end_date": "2026-06-15"}),
+        answer="That is 151 days.",
+    ),
+    InstructExample(
+        user="How long is the whole of March 2026, from the 1st to the 31st?",
+        call=("days_between", {"start_date": "2026-03-01", "end_date": "2026-03-31"}),
+        answer="That is 30 days.",
+    ),
+    InstructExample(
+        user="My flight lands in Tokyo and I have no idea what time it'll be there.",
+        call=("current_time", {"timezone": "Asia/Tokyo"}),
+        result="2026-03-14 18:41:02 (Saturday) in Asia/Tokyo [UTC+09:00]",
+        pinned=True,
+        answer="It is currently 18:41 on Saturday in Tokyo.",
+    ),
+    InstructExample(
+        user="I'm supposed to call someone in Berlin but I don't want to wake them.",
+        think="Whether it is a reasonable hour depends on the time there, so I should check.",
+        call=("current_time", {"timezone": "Europe/Berlin"}),
+        result="2026-03-14 10:41:02 (Saturday) in Europe/Berlin [UTC+01:00]",
+        pinned=True,
+        answer="It is 10:41 in the morning in Berlin, so you are safe to call.",
+    ),
+    InstructExample(
+        user="A friend mentioned some big storm in Europe this week and I missed it entirely.",
+        call=("web_search", {"query": "Europe storm this week news"}),
+        result=(
+            "Storm warnings across northern Europe - Met Office\n"
+            "https://www.metoffice.gov.uk/weather/warnings-and-advice\n"
+            "High winds and heavy rain affected parts of northern Europe, with "
+            "travel disruption reported in several countries."
+        ),
+        pinned=True,
+        answer=(
+            "A search turns up storm warnings across northern Europe this week, "
+            "with high winds, heavy rain and travel disruption in several countries."
+        ),
+    ),
+)
+
+
 _HEBREW: tuple[InstructExample, ...] = (
     # -- Calculator, in Hebrew --------------------------------------------
     InstructExample(
@@ -1522,6 +1743,8 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_REBALANCE,
     *_MULTI_TURN,
     *_TALK_NATURALLY,
+    *_FLUENT_NO_TOOL,
+    *_FLUENT_TOOL_USE,
     *_HEBREW,
 )
 

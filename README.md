@@ -61,13 +61,26 @@ minerva finetune         # stage 2: teach it to hold a chat    (~1.5 min, CPU)
 minerva ask "What is 17 times 43?"
 ```
 
-**1. The corpus** — 42.33 MB of real, human-written prose across seven
-sources: Project Gutenberg literature, the Brown corpus (short-declarative
-press and fiction), European Parliament debate, US political oratory,
-informal web text, and **curated Hebrew literature** from Project Ben-Yehuda
-(added in v0.2.0). Every source is downloaded from its original distributor
-with its licence and origin recorded in a generated `manifest.json`. Nothing
-is templated, generated or augmented.
+**1. The corpus** — 185.5 MB of real, human-written prose across eight
+sources: Project Gutenberg literature (18 books via NLTK plus **119 more
+fetched by ebook id**), the Brown corpus (short-declarative press and
+fiction), European Parliament debate, US political oratory, informal web
+text, and **curated modern Hebrew literature** from Project Ben-Yehuda (35
+authors). Every source is downloaded from its original distributor with its
+licence and origin recorded in a generated `manifest.json`. Nothing is
+templated, generated or augmented.
+
+**v0.4.0 grew the corpus 4.4× because measurement said the model was
+data-starved, not too small.** Chinchilla's ~20-tokens-per-parameter rule
+put even the 9.9M model at **7.4% of the tokens it wanted**; scaling
+parameters would have made that ratio worse. So the parameter count stayed
+put and the text grew instead. Two curation calls are worth naming: 119
+Gutenberg ids were each fetched and verified before being written down (which
+caught two that duplicated books already in the corpus), and Ben-Yehuda's
+*medieval* poets were deliberately excluded despite being its largest
+contributors — 11th–17th century liturgical verse is to conversational
+Hebrew what Chaucer is to spoken English. Details and the leak-scan results
+in [`docs/TRAINING.md`](docs/TRAINING.md#5d-v040--the-corpus-was-the-bottleneck-not-the-parameter-count).
 
 **v0.3.0 removed Simple English Wikipedia and Reuters newswire** — not for
 quality, for capability: Swift is 9.9M parameters, with nowhere to reliably

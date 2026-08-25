@@ -561,6 +561,110 @@ this round changed.
 
 ---
 
+## 5d. v0.4.0 — the corpus was the bottleneck, not the parameter count
+
+The goal for this round was **fluency**: replies that read as connected,
+relevant prose in both English and Hebrew. The obvious lever looked like
+parameters, and the plan was to scale the model up. Measuring first changed
+the plan, which is the point of measuring first.
+
+### The measurement that overturned the plan
+
+Chinchilla's rule of thumb puts the compute-optimal point near **20 training
+tokens per parameter**. Against v0.3.0's corpus, every configuration was
+starved:
+
+| params | tokens Chinchilla wants | v0.3.0 corpus had | % of optimal |
+|---|---|---|---|
+| 9.9M (shipped) | 198M | 14.7M | **7.4%** |
+| 29M | 580M | 14.7M | 2.5% |
+| 55M | 1,100M | 14.7M | 1.3% |
+| 91M | 1,820M | 14.7M | 0.8% |
+
+Swift was not parameter-limited. It was **data-limited by more than 13x**,
+and scaling parameters would have made the ratio worse, not better — a bigger
+model on the same 14.7M tokens overfits sooner and generalises less. The
+honest fix was more real text.
+
+### What was added
+
+The corpus grew from **42.6 MB to 185.5 MB** (~64M unique tokens, a 4.4x
+expansion), from two sources that were already trusted, just under-used:
+
+* **Project Gutenberg, 119 more books** (89.0 MB). NLTK's `gutenberg` source
+  ships only 18. These are fetched per-book by ebook id straight from
+  gutenberg.org — novels, gothic, detective, adventure, early science
+  fiction, children's literature, essays, philosophy, drama and translated
+  classics, chosen for register diversity rather than raw size. Every id was
+  **fetched and checked before it was written into the source**: that it
+  resolves, that it is a substantial Gutenberg ebook, and that it is
+  mostly-Latin script. Three deliberately-invalid control ids were included
+  in the check and correctly rejected. The check also caught two real
+  mistakes — id 1522 is *Julius Caesar* and 19033 is *Alice in Wonderland*,
+  both already shipped by the NLTK source, so both were dropped rather than
+  duplicated into the corpus.
+* **Project Ben-Yehuda, 7 authors → 35** (17.3 MB → 71.2 MB). All modern
+  Hebrew: Haskalah and Hebrew-revival writers onward. The deliberate
+  exclusion matters more than the inclusion — Ben-Yehuda's largest
+  contributors by work count are **medieval** poets (Samuel HaNagid alone has
+  1,856 works, plus Ibn Gabirol, Judah Halevi, the Ibn Ezras, Shabazi).
+  Including them would have more than doubled the Hebrew side, and was
+  refused: 11th–17th century liturgical and courtly verse is to modern
+  conversational Hebrew roughly what Chaucer is to spoken English, and this
+  model is meant to hold a conversation. Register was bought over volume.
+
+Final mixture: 185.5 MB — 114.4 MB English (62%), 71.2 MB Hebrew (38%),
+holding roughly the v0.3.0 language balance at four times the size.
+
+### Two real leaks, found by scanning the built corpus
+
+The cleaners were checked by scanning the **entire** 184.7M-character build
+for boilerplate, not by reading the code and assuming. Both hits were real:
+
+| leak | before | after |
+|---|---|---|
+| `&nbsp;` (Ben-Yehuda HTML entities) | 9,832 | **1** |
+| `↩︎` (footnote-return arrows) | 9,429 | **0** |
+| Gutenberg licence footer / donation address | 7 | **0** |
+
+The Hebrew hits were HTML pipeline residue in Ben-Yehuda's plain-text
+release; `_clean_benyehuda` now unescapes entities and strips the arrows. The
+Gutenberg hits were the more interesting find: they came from the **old NLTK
+source**, not the new one — its copies are mostly pre-stripped, but the
+Chesterton files still carried an END marker and the foundation's donation
+address behind it. That is a pre-existing defect dating to v0.1.0, found only
+because the new source prompted a full scan. Both cleaners have regression
+tests. Three occurrences survive in 184.7M characters (0.0000016%), almost
+certainly double-escaped entities, and were judged not worth another rebuild.
+
+### The decision: same parameters, far more tokens
+
+With ~64M unique tokens available, the compute-optimal size is the size Swift
+already is:
+
+| config | params | tokens wanted | epochs over 64M |
+|---|---|---|---|
+| **n_layer=6, d_model=320 (shipped)** | **9.9M** | **198M** | **3.1x** |
+| n_layer=8, d_model=512 | 29.1M | 582M | 9.1x |
+| n_layer=10, d_model=640 | 54.8M | 1,096M | 17.1x |
+
+At 29M the model would need nine passes over the corpus to be
+compute-optimal, and at 55M seventeen — deep into the repetition where a
+small corpus starts being memorised rather than generalised from. **So the
+architecture is unchanged and the token budget grows instead**: from 36.86M
+tokens (v0.3.0) toward ~164M, roughly 2.6 passes over a corpus 4.4x larger.
+This reverses the "scale the model up" plan on measured grounds, and is
+recorded here rather than quietly dropped.
+
+The vocabulary was left at 8,192 for this round. §2's vocab measurement said
+to repeat itself "if Hebrew's share of the corpus grows substantially" —
+Hebrew's *share* moved only 34% → 38%, though its absolute size grew 4x, so
+the condition is arguably met and the measurement is **outstanding, not
+settled**. It is named here as a known gap rather than presented as a
+decision that was made.
+
+---
+
 ## 6. Running the weights
 
 `src/minerva/engines/native.py`
