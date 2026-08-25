@@ -69,18 +69,40 @@ jobs:
         run: pip install -e ".[training,dev]"
 
       # The corpus is downloaded from its original distributors, never
-      # vendored (see src/minerva/training/data.py). Caching the downloaded
-      # archives keeps repeated runs from re-fetching ~270 MB every time; the
-      # cache key is the corpus definition itself, so editing SOURCES or a
-      # cleaner correctly invalidates it.
-      - name: Cache downloaded corpus archives
+      # vendored (see src/minerva/training/data.py).
+      #
+      # The whole `data/` directory is cached, not just the downloaded
+      # archives, because training the byte-level BPE on the v0.4.0 corpus
+      # (185 MB) takes about an hour on four cores - so on a two-core runner
+      # it would eat a large share of every 4.5-hour cycle, rebuilding a
+      # tokenizer bit-identical to the previous cycle's. The key is the code
+      # that determines the output, so editing SOURCES, a cleaner or the
+      # tokenizer correctly invalidates it and forces an honest rebuild.
+      - name: Cache the built corpus, tokenizer and token bins
+        id: corpus
         uses: actions/cache@v4
         with:
-          path: data/cache
-          key: corpus-${{ hashFiles('src/minerva/training/data.py') }}
+          path: data
+          key: corpus-v2-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py') }}
 
       - name: Build the corpus, tokenizer and token bins
+        if: steps.corpus.outputs.cache-hit != 'true'
         run: minerva prepare-data --data data
+
+      # A cache hit must still leave a usable corpus behind. If it does not,
+      # training would fail later and more confusingly than it does here.
+      - name: Verify the corpus is present
+        run: |
+          set -euo pipefail
+          for f in data/tokenizer.json data/train.bin data/val.bin; do
+            test -s "$f" || { echo "::error::$f is missing or empty after corpus setup"; exit 1; }
+          done
+          python - <<'PY'
+          from pathlib import Path
+          for name in ("train", "val"):
+              size = Path(f"data/{name}.bin").stat().st_size
+              print(f"{name}.bin: {size / 2 / 1e6:.1f}M tokens")
+          PY
 
       - name: Fetch the newest checkpoint to resume from
         if: inputs.resume
