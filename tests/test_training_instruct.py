@@ -199,6 +199,52 @@ class TestEvalSetIsHeldOut:
                 assert float(case.expected_value or 0) == float(known[case.prompt])
 
 
+class TestLanguageAndCoherenceMetrics:
+    """v0.4.0 metrics, added because routing read 97.7% while a user was
+    reporting that the answers had nothing to do with the questions."""
+
+    def test_hebrew_and_english_are_told_apart(self) -> None:
+        from minerva.training.instruct_eval import _dominant_script
+
+        assert _dominant_script("What time is it in Paris?") == "en"
+        assert _dominant_script("מה השעה בלונדון?") == "he"
+
+    def test_a_proper_noun_in_the_other_script_does_not_flip_the_verdict(self) -> None:
+        from minerva.training.instruct_eval import _dominant_script
+
+        # Naming the model in Latin letters inside a Hebrew sentence is
+        # normal, not a language failure.
+        assert _dominant_script("השם שלי הוא Swift ואני מודל קטן.") == "he"
+
+    def test_too_few_letters_is_unscorable_rather_than_guessed(self) -> None:
+        from minerva.training.instruct_eval import _dominant_script
+
+        assert _dominant_script("42") is None
+        assert _dominant_script("") is None
+
+    def test_the_real_v030_failure_is_now_caught(self) -> None:
+        """The exact case v0.3.0 scored as a pass: Hebrew in, English out."""
+        from minerva.training.instruct_eval import _dominant_script
+
+        prompt, answer = "מה מחיר המניה של אפל היום?", "I do not know."
+        assert _dominant_script(prompt) != _dominant_script(answer)
+
+    def test_repetition_is_detected(self) -> None:
+        from minerva.training.instruct_eval import _is_degenerate
+
+        assert _is_degenerate("I do not know. I do not know. I do not know.")
+        assert _is_degenerate("yes yes yes yes yes yes yes yes")
+
+    def test_normal_answers_are_not_flagged(self) -> None:
+        from minerva.training.instruct_eval import _is_degenerate
+
+        assert not _is_degenerate("Argentina won the 2022 World Cup, beating France on penalties.")
+        assert not _is_degenerate("It is 11:41 in Jerusalem.")
+        # Short answers cannot be judged for repetition and must not be
+        # flagged - "Twelve." is a perfectly good reply.
+        assert not _is_degenerate("Twelve.")
+
+
 class TestSupervisedEncoding:
     @pytest.fixture(scope="class")
     @classmethod

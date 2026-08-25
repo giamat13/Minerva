@@ -26,6 +26,19 @@ What is measured
               reported separately for exactly that reason.
 ``answer``    End to end through the agent loop: does the final reply contain
               the correct value?
+``language``  Was the reply in the language the question was asked in? Added
+              in v0.4.0. Every metric above can pass while the model answers
+              a Hebrew question in English - v0.3.0's own eval log contains
+              exactly that, scored as a pass. For a bilingual model that is
+              the most visible failure there is, so it gets its own number.
+``coherence`` Did the reply avoid collapsing into repetition? Also v0.4.0.
+              A small model that has lost the thread tends to echo a phrase
+              rather than stop, which reads as broken to a user even when
+              routing was right.
+
+The last two exist because a user reported that replies were "not related to
+what I asked" while routing accuracy read 97.7%. Both numbers were true; the
+eval was simply not measuring the thing that was wrong.
 """
 
 from __future__ import annotations
@@ -135,6 +148,61 @@ _REFUSAL_MARKERS = (
 
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
+# --- Answering in the language you were asked in ---------------------------
+# Routing and argument accuracy say nothing about the most visible failure a
+# bilingual model has: being asked in Hebrew and replying in English. v0.3.0's
+# eval log contains exactly that ("מה מחיר המניה של אפל היום?" -> "I do not
+# know."), scored as a pass by every metric there was. This measures it.
+#
+# Script is counted over letters only - digits, punctuation and whitespace are
+# shared between the two languages and would just add noise. A proper noun in
+# the other script ("Swift") is normal and should not fail the case, so the
+# test is which script *dominates*, not whether the other appears at all.
+_HEBREW_LETTER = re.compile(r"[֐-׿]")
+_LATIN_LETTER = re.compile(r"[A-Za-z]")
+
+
+def _dominant_script(text: str) -> str | None:
+    """``"he"``, ``"en"``, or ``None`` when there are too few letters to tell."""
+    hebrew = len(_HEBREW_LETTER.findall(text))
+    latin = len(_LATIN_LETTER.findall(text))
+    if hebrew + latin < 3:
+        return None
+    return "he" if hebrew > latin else "en"
+
+
+# A small model that has lost the thread often repeats itself rather than
+# stopping - "I do not know. I do not know." or a word echoed a dozen times.
+# That reads as broken to a user even when routing was correct, so it is
+# measured rather than left to impressions.
+_MIN_WORDS_FOR_REPETITION = 6
+
+
+def _is_degenerate(text: str) -> bool:
+    words = text.split()
+    if len(words) < _MIN_WORDS_FOR_REPETITION:
+        return False
+    # One token dominating the whole answer.
+    counts: dict[str, int] = {}
+    for word in words:
+        key = word.strip(".,!?;:\"'").lower()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    if counts and max(counts.values()) / len(words) > 0.4:
+        return True
+    # A repeated multi-word phrase, e.g. an answer that says the same
+    # sentence twice.
+    for size in (3, 4, 5):
+        if len(words) < size * 2:
+            continue
+        seen: dict[str, int] = {}
+        for i in range(len(words) - size + 1):
+            phrase = " ".join(words[i : i + size]).lower()
+            seen[phrase] = seen.get(phrase, 0) + 1
+            if seen[phrase] >= 3:
+                return True
+    return False
+
 
 def _mentions(value: str, text: str) -> bool:
     """True when ``text`` states ``value`` as a number, ignoring separators."""
@@ -197,6 +265,10 @@ def evaluate_instruct(
         "answer_ok": 0,
         "refusal_expected": 0,
         "refusal_ok": 0,
+        "language_scorable": 0,
+        "language_ok": 0,
+        "answered": 0,
+        "coherent": 0,
     }
     rows: list[dict[str, Any]] = []
 
@@ -245,6 +317,22 @@ def evaluate_instruct(
             totals["refusal_expected"] += 1
             totals["refusal_ok"] += any(m in answer.lower() for m in _REFUSAL_MARKERS)
 
+        # Answered in the language it was asked in? Only scorable when both
+        # sides carry enough letters to tell - an answer of "42" has no script.
+        want_script = _dominant_script(case.prompt)
+        got_script = _dominant_script(answer)
+        language_ok = None
+        if want_script is not None and got_script is not None:
+            totals["language_scorable"] += 1
+            language_ok = want_script == got_script
+            totals["language_ok"] += language_ok
+
+        # Coherence: produced something, and did not collapse into repetition.
+        degenerate = _is_degenerate(answer)
+        if answer.strip():
+            totals["answered"] += 1
+            totals["coherent"] += not degenerate
+
         rows.append(
             {
                 "prompt": case.prompt,
@@ -252,6 +340,8 @@ def evaluate_instruct(
                 "called": called,
                 "routing_ok": routing_ok,
                 "arguments_ok": arguments_ok,
+                "language_ok": language_ok,
+                "degenerate": degenerate,
                 "answer": answer,
                 "error": failed,
             }
@@ -275,6 +365,8 @@ def evaluate_instruct(
         "argument_accuracy_pct": pct("arguments_ok", "tool_expected"),
         "final_answer_accuracy_pct": pct("answer_ok", "value_expected"),
         "honest_refusal_pct": pct("refusal_ok", "refusal_expected"),
+        "language_match_pct": pct("language_ok", "language_scorable"),
+        "coherence_pct": pct("coherent", "answered"),
         "counts": totals,
     }
     return {"summary": summary, "cases": rows}
@@ -306,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  argument accuracy     {summary['argument_accuracy_pct']:5.1f}%")
     print(f"  final answer correct  {summary['final_answer_accuracy_pct']:5.1f}%")
     print(f"  honest refusal        {summary['honest_refusal_pct']:5.1f}%")
+    print(f"  answered in-language  {summary['language_match_pct']:5.1f}%")
+    print(f"  coherent (no repeats) {summary['coherence_pct']:5.1f}%")
 
     if args.json:
         args.json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
