@@ -449,6 +449,118 @@ language, and this document does not describe it as one.
 
 ---
 
+## 5c. The run that produced Swift v0.3.0 — removing facts, restoring register
+
+**What changed and why.** Two sources were removed from the corpus: Simple
+English Wikipedia (general knowledge) and Reuters newswire (event reporting).
+Not a quality decision — a capability one. Swift is 9.9M parameters; it has
+nowhere to reliably store "the capital of X" or "what happened on date Y",
+and training on text whose whole point is dense factual claims does not give
+it that capacity, it gives it fluent confabulation. `minerva.tools.builtin.
+web_search` (a real DuckDuckGo HTML-search call, no API key) replaces both:
+the model looks a fact up instead of guessing at one it was never big enough
+to remember correctly. `instruct_data.py`'s `_UNKNOWN` section was split:
+what stays a flat refusal is what no tool fixes (the model's own memory of
+this conversation, a capability it genuinely lacks); what a search can
+actually resolve now routes to `web_search` instead.
+
+**The regression this caused, measured, not guessed.** Removing Reuters and
+Wikipedia cost the corpus more than their facts — they were also its only
+short, declarative, factual-register prose. A first retrain on the resulting
+36.46 MB corpus (everything else unchanged) produced a base model that,
+finetuned on the *unchanged* 219-example instruct set from v0.2.0, only
+reached 62% best routing accuracy and produced empty or malformed answers to
+basic arithmetic — far below the 91–97% this document records for earlier
+rounds. Isolating the cause mattered: finetuning the same untouched
+219-example set against the *old* base model was never re-run to compare
+directly, but the fact that the regression showed up on an instruct set that
+had not changed pointed at the base model, not the data added on top of it.
+
+**The fix: the Brown corpus, added back for register, not facts.** Brown was
+rejected in v0.1.0/v0.2.0 for a formatting reason — NLTK distributes it
+POS-tagged (`The/at Fulton/np-tl`) and naively de-tagging it leaves a space
+in front of every comma and period. That turned out to be a solvable cleaning
+problem (`_clean_brown` in `data.py`: strip the `/TAG` suffix, then a real
+punctuation-aware detokenizer, with the ``/`` `` / `''` quote-tag pair
+converted to a proper paired `"` *before* the punctuation pass runs, so a
+quote immediately followed by a comma collapses correctly). The text itself —
+c.1961 American press reportage, editorial and fiction — is exactly the
+missing register: short and declarative, and old and general enough in
+subject that it is not a database of facts worth memorising the way Wikipedia
+or 1987 Reuters newswire is.
+
+| | pre-v0.3.0 (v0.2.0) | v0.3.0, no Brown (regression) | v0.3.0, + Brown |
+|---|---|---|---|
+| Corpus size | 50.8 MB | 36.46 MB | **42.33 MB** |
+| Held-out loss | 3.8542 | 3.8765 | **3.5300** |
+| Held-out perplexity | 47.19 | 48.26 | **34.12** |
+| Bits per byte | 1.4516 | 1.3862 | **1.3738** |
+| Instruct routing accuracy | 91–97% | 70.5%\* | **97.7%** |
+| Instruct argument accuracy | — | 3.4%\* | 10.3% |
+
+\* Measured on the full v0.3.0 271-example instruct set (see §8); the
+219-example control run scored even lower (34.1% routing) on the same held-out
+cases, with empty answers on most arithmetic prompts.
+
+**Corpus, final:** Gutenberg 11.73 MB, Brown 5.98 MB, webtext 1.72 MB,
+inaugural 0.82 MB, State of the Union 2.07 MB, Europarl (English) 3.06 MB,
+Project Ben-Yehuda (Hebrew) 17.25 MB — 42.33 MB train / 0.36 MB val.
+
+**The run itself:** same architecture, same 4,500-step / 36.86M-token budget
+as every version before it. Wall clock is reported as compute time rather
+than a single elapsed span this round — the process was interrupted twice by
+the development environment reclaiming idle background processes (not a
+training bug) and resumed both times from its last checkpoint
+(`--resume checkpoints/swift/last.pt`), losing at most the ~500 steps since
+the last `checkpoint_interval` save each time. Total compute across all
+segments was a little over 90 minutes; a completely uninterrupted run should
+land near the ~99 minutes v0.2.0 took on the same hardware. Recorded here
+because a quietly-resumed run is a run nobody can audit otherwise.
+
+### The curve
+
+| step | val loss | perplexity |
+|---|---|---|
+| 250 | 4.8720 | 130.59 |
+| 1,000 | 4.0053 | 54.89 |
+| 2,000 | 3.7011 | 40.49 |
+| 3,000 | 3.5295 | 34.11 |
+| 4,000 | 3.4142 | 30.39 |
+| 4,500 (final training-loop eval) | 3.3921 | 29.73 |
+| **held-out, full val set (`minerva evaluate`)** | **3.5300** | **34.12** |
+
+The final training-loop number (3.3921) and the full held-out evaluation
+(3.5300) differ because the in-loop eval scores a 20-batch sample each time
+for speed, while `minerva evaluate` scores all 114,688 held-out tokens. The
+full-evaluation number is the one reported as authoritative above and in the
+README.
+
+### Real samples (temperature 0.8, top-k 40, unedited)
+
+> **"It is a truth universally acknowledged, that"** → *he is so much as to a
+> certain sort of man in him. I hope you may be more vicarious; but, as if
+> you are, you will, I say you, and your own friends must be so very much a
+> person." "I am not too mistaken at all," said Mr. Knightley, "he will not
+> have it."*
+
+> **"The company said it expects"** → *that the public money should be called
+> out. I cannot report that the state of my country were not to be a
+> "personal man", but it was not "because the people were in the hands of
+> them, but I know it is not true and wrong in the spirit of a democracy".*
+
+> **"שלום רב"** → *ץ" – והוא הוא, "לא" – הכל לפי דרכי האדם היהודי. כלומר: מפני
+> מה? מה יעשו לו זה? כך הוא אומר, כי גם זה הוא, שהנחותה הוא עושה את הלבבות;
+> אבל לא עלו בידו ולא מפרע מעולם ולא יכול לעמוד על דעתו...*
+
+Real, correctly-punctuated dialogue with properly paired quotation marks —
+directly attributable to the Brown corpus's press/fiction register, which is
+exactly the register the regression traced back to losing. Hebrew still shows
+the same "grammatical in short spans, loses the thread over a full sentence"
+pattern v0.2.0 documented; that is a corpus-scale limitation, not something
+this round changed.
+
+---
+
 ## 6. Running the weights
 
 `src/minerva/engines/native.py`
@@ -653,6 +765,68 @@ it shows. This is a first, measured round, not a finished capability — the
 honest next step is more hand-written Hebrew examples specifically in the
 refusal category, written and measured the same way, not assumed to already
 work because the average numbers above look reasonable.
+
+### v0.3.0: web_search routing, and the Brown-corpus recovery
+
+Two changes landed together and both needed retraining: the base model
+changed (§5c), and `instruct_data.py` grew from 219 to **271** examples —
+`_TALK_NATURALLY`, 36 new English conversational examples plus 16 new Hebrew
+ones (greetings, opinions, clarifying questions, self-description, everyday
+reasoning, plain word definitions, short practical help), drafted in themed
+batches, each checked for duplicates against the existing set and the
+held-out eval, and for factual claims against the *current* pretraining
+corpus before merging (one drafted answer referenced the pre-v0.3.0 corpus
+size and its since-removed newswire source; one Hebrew arithmetic riddle
+didn't actually follow from its own premise — both caught and fixed/dropped,
+not shipped unread). The existing `_UNKNOWN` section was also split: eight
+English and three Hebrew "I don't know" examples became `web_search` calls
+instead, for exactly the questions a search can actually resolve (see §5c
+and `instruct_data.py`'s own docstring for the line between the two).
+
+**Isolating the base-model regression from the data change mattered enough to
+measure directly.** Finetuning the *old*, untouched 219-example set against
+the *new* base model (before the Brown-corpus fix) reached only 34.1% routing
+accuracy on the held-out set, with empty answers on nearly every arithmetic
+prompt — worse than the 271-example set's 70.5% on the same broken base. That
+ruled out the new instruct examples as the cause and pointed at the base
+model, which is what led to §5c's Brown-corpus fix rather than a data
+rollback.
+
+Held-out evaluation, 44 hand-written cases (English and Hebrew combined —
+this round did not re-run the separate-by-language scoring §8's v0.2.0
+section used; that is a real gap in this round's measurement, not a claim
+that Hebrew and English perform identically):
+
+| | v0.2.0 (+34 Hebrew) | v0.3.0, regressed base | v0.3.0, + Brown fix |
+|---|---|---|---|
+| format valid | 97.1%\* | 95.5% | **100.0%** |
+| routing accuracy | 97.1%\* | 70.5% | **97.7%** |
+| tool name accuracy | 94.4%\* | 58.6% | **93.1%** |
+| argument accuracy | 22.2%\* | 3.4% | 10.3% |
+| final answer correct | 18.8%\* | 0.0% | 9.5% |
+| honest refusal | 66.7%\* | 100.0%† | 66.7% |
+
+\* v0.2.0's English-only column, for the closest like-for-like comparison;
+v0.3.0's 44 cases blend both languages.
+† Spurious: nearly every answer on the regressed base was malformed text
+that happened to contain a refusal-marker word, not an actual honest decline.
+
+The fixed run **matches or beats v0.2.0's best routing and refusal numbers**,
+on a corpus with no memorisable general-knowledge or event content left in
+it. Argument accuracy (10.3%) and final-answer correctness (9.5%) are real
+and still weak — copying exact operands into a tool call is a general skill a
+271-example hand-written set was never going to solve on its own, the same
+conclusion §8's very first section drew from 185 examples. That is a known,
+pre-existing limitation of a model this size, not a new regression.
+
+**`web_search` verified callable, not just present in the registry:** a live
+request through `minerva serve`'s `/api/chat` with the prompt "What is the
+population of Japan?" produced a genuine `web_search` tool call, a real
+DuckDuckGo HTML request that returned real results from real websites, fed
+back into the model's context. The query the model formed and the final
+answer it wrote from the results were both poor (the same argument-accuracy
+weakness above, applied to a tool call instead of `calculate`) — but the
+mechanism itself, end to end, through the real HTTP API, is proven working.
 
 ### Thinking was trained, measured, and switched off
 

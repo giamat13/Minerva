@@ -15,9 +15,6 @@ Deliberate exclusions
 Corpora that were available were rejected on quality grounds, which is the
 kind of decision `CLAUDE.md` asks for explicitly:
 
-* **Brown corpus** - distributed POS-tagged (``The/at Fulton/np-tl``).
-  De-tagging is mechanical but leaves unnatural spacing around punctuation,
-  which teaches the model a typography that no real text uses.
 * **Movie reviews (Pang & Lee)** - distributed lowercased and pre-tokenised
   (``films adapted from comic books , whether they 're``). Casing and spacing
   are destroyed, and a language model would learn the damage.
@@ -53,6 +50,34 @@ The honest fix is not more parameters; it is not asking the weights to be a
 fact database at all. `minerva.tools.builtin.web_search` is the replacement:
 a real tool, so the model looks a fact up instead of guessing at one it was
 never big enough to remember correctly.
+
+Added back in v0.3.0: Brown corpus, for register not facts
+------------------------------------------------------------
+Removing Reuters and Wikipedia cost the corpus more than their facts: they
+were also its only *short, declarative, factual-register* prose. What
+remained (Gutenberg, oratory, parliamentary debate, Hebrew literature) is
+long-form and rhetorical, and a held-out measurement after the v0.3.0 retrain
+showed the cost was real - `swift-instruct` finetuned on the resulting base
+model scored far below the numbers `docs/TRAINING.md` records for earlier
+rounds (routing accuracy fell from the 90s into the 60-70% range, and
+argument accuracy - producing a clean, correct `calculate` call - collapsed
+to single digits), even on the *unchanged* instruct set from before this
+change, isolating the regression to the base model rather than the instruct
+data.
+
+The Brown corpus was rejected in v0.1.0/v0.2.0 for a **formatting** reason,
+not a content one: NLTK distributes it POS-tagged (``The/at Fulton/np-tl``),
+and the module docstring at the time said de-tagging "leaves unnatural
+spacing around punctuation." That turned out to be a solvable cleaning
+problem (see `_clean_brown`), not a reason to reject the text - and the text
+itself is exactly the missing register: c.1961 American press reportage,
+editorial and fiction, short and declarative, real and licensed for
+redistribution. It is not a database of facts to memorise the way Wikipedia
+or 1987 Reuters newswire is - it is old enough, and general enough in
+subject, to teach sentence structure without teaching anything worth
+confabulating. The original rejection was reversed, not ignored: the reason
+it no longer applies is written down here, per `CLAUDE.md`'s rule that a
+judgement call gets recorded, not just changed.
 """
 
 from __future__ import annotations
@@ -102,12 +127,13 @@ class CorpusSource:
 
 
 # --- THE CORPUS ------------------------------------------------------------
-# Roughly 50 MB across six English registers - literature, newswire,
-# spoken/political oratory, informal web writing, and now encyclopedic
-# reference prose - plus Swift's first non-English source: curated Hebrew
-# literature. The mix is deliberate - a model trained only on 19th-century
-# novels writes only 19th-century novels, and a model that never sees Hebrew
-# cannot write it.
+# English registers - literary, short-declarative press/fiction, informal
+# web writing, spoken/political oratory - plus Swift's non-English source:
+# curated Hebrew literature. No encyclopedic or news *content* (see "Removed
+# in v0.3.0" above): Brown supplies the short-sentence register that used to
+# come from Reuters and Wikipedia, without their factual payload. The mix is
+# deliberate - a model trained only on 19th-century novels writes only
+# 19th-century novels, and a model that never sees Hebrew cannot write it.
 SOURCES: tuple[CorpusSource, ...] = (
     CorpusSource(
         name="gutenberg",
@@ -121,6 +147,27 @@ SOURCES: tuple[CorpusSource, ...] = (
             "corpus - long-form, carefully edited, correctly typeset English."
         ),
         cleaner="gutenberg",
+    ),
+    CorpusSource(
+        name="brown",
+        url=f"{_NLTK_BASE}/brown.zip",
+        patterns=("brown/????",),
+        licence="Distributed with the permission of the copyright holder (Brown "
+        "University); redistribution permitted",
+        origin=(
+            "The Brown Corpus (Francis & Kucera, 1964/1979), via the NLTK data "
+            "distribution - 500 samples of c.1961 American English"
+        ),
+        description=(
+            "Short, declarative press reportage, editorial and fiction - the "
+            "register Reuters and Wikipedia used to supply, restored here "
+            "without their factual content: 1961 news is neither current nor "
+            "worth memorising, only worth imitating the sentence structure of. "
+            "Rejected in earlier versions for a formatting reason (distributed "
+            "POS-tagged) that turned out to be a solvable cleaning problem, not "
+            "a reason to exclude the text - see the module docstring."
+        ),
+        cleaner="brown",
     ),
     CorpusSource(
         name="webtext",
@@ -333,6 +380,44 @@ def _clean_europarl(text: str) -> str:
     return _clean_generic(_EUROPARL_TAG.sub("", text))
 
 
+# Brown is distributed word-by-word POS-tagged: "The/at Fulton/np-tl said/vbd".
+# Stripping the /TAG suffix is mechanical (split on the last '/', since tags
+# never contain one - contractions like "didn't/dod*" and "he'd/pps+md" are
+# single tokens already). The harder part, and the reason this source was
+# rejected before, is that naively joining the bare words back with spaces
+# puts a space in front of every comma and period ("election , the jury
+# said ."), which is not how English is written. This detokenizes properly:
+# no space before closing punctuation, none after an opening bracket, and the
+# ``/'' tag pair (Brown's own opening/closing quote marks) becomes a real
+# paired '"', converted before the punctuation-spacing pass runs so a quote
+# immediately followed by a comma collapses correctly instead of leaving a
+# stray space between them.
+_BROWN_TAG = re.compile(r"/[^/\s]+$")
+_NO_SPACE_BEFORE = re.compile(r"\s+([.,;:!?%)\]}])")
+_NO_SPACE_AFTER = re.compile(r"([(\[{])\s+")
+
+
+def _clean_brown(text: str) -> str:
+    lines = []
+    for line in text.split("\n"):
+        words = []
+        for raw_token in line.split():
+            word = _BROWN_TAG.sub("", raw_token)
+            if word == "``":
+                word = "\x00OPEN\x00"
+            elif word == "''":
+                word = "\x00CLOSE\x00"
+            if word:
+                words.append(word)
+        lines.append(" ".join(words))
+    joined = "\n".join(lines)
+    joined = re.sub(r"\s*\x00OPEN\x00\s*", ' "', joined)
+    joined = re.sub(r"\s*\x00CLOSE\x00\s*", '" ', joined)
+    joined = _NO_SPACE_BEFORE.sub(r"\1", joined)
+    joined = _NO_SPACE_AFTER.sub(r"\1", joined)
+    return _clean_generic(joined)
+
+
 # Every Project Ben-Yehuda text file ends with a volunteer credit paragraph
 # ("the text[s] above were produced by Project Ben-Yehuda volunteers online.
 # always available at the following address: https://benyehuda.org/read/...").
@@ -351,6 +436,7 @@ def _clean_benyehuda(text: str) -> str:
 _CLEANERS = {
     "generic": _clean_generic,
     "gutenberg": _clean_gutenberg,
+    "brown": _clean_brown,
     "europarl": _clean_europarl,
     "benyehuda": _clean_benyehuda,
 }
@@ -507,7 +593,6 @@ def build_corpus(
             "val": hashlib.sha256(val_text.encode("utf-8")).hexdigest(),
         },
         "excluded": {
-            "brown": "distributed POS-tagged; de-tagging leaves unnatural punctuation spacing",
             "movie_reviews": (
                 "distributed lowercased and pre-tokenised; casing and spacing destroyed"
             ),

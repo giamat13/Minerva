@@ -51,6 +51,11 @@ Repository = "https://github.com/giamat13/minerva"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# webui.py serves this file from disk (see _PAGE_PATH) rather than embedding
+# it as a Python string, so it must be included explicitly for real installs.
+minerva = ["webui_chat.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

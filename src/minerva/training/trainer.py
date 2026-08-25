@@ -400,6 +400,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-hours", type=float, default=None)
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--seed", type=int, default=TrainConfig.seed)
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=TrainConfig.checkpoint_interval,
+        help="save 'last' every N steps - lower this on flaky hardware to bound lost work",
+    )
     args = parser.parse_args(argv)
 
     if args.threads:
@@ -423,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=args.lr,
         max_hours=args.max_hours,
         seed=args.seed,
+        checkpoint_interval=args.checkpoint_interval,
     )
 
     model = SwiftLM(model_config)

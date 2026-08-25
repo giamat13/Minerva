@@ -1,0 +1,166 @@
+# Train Minerva models on GitHub's free runners.
+#
+# WHY THIS IS SHAPED THE WAY IT IS
+# --------------------------------
+# A GitHub-hosted runner is 2 CPU cores and a hard 6-hour job limit. Swift's
+# shipped 4,500-step / 36.86M-token budget takes ~90-155 min on a 4-core
+# machine (docs/TRAINING.md 5a/5c), so on half the cores it lands close to,
+# and can exceed, that 6-hour ceiling - and a larger model exceeds it
+# outright. A job killed at the limit loses everything it did.
+#
+# So training here is *resumable across runs*, not a single heroic job:
+#
+#   1. `--max-hours` stops the run cleanly before the runner is killed,
+#      leaving a real checkpoint behind.
+#   2. Every run uploads `checkpoints/` as an artifact, `if: always()`, so
+#      even a crashed or timed-out job keeps its progress.
+#   3. `resume: true` pulls the newest checkpoint artifact from a previous
+#      run and continues from it.
+#
+# Run it repeatedly with `resume: true` until the step budget is met. The
+# `finished N steps` line in the log says when it is done.
+name: train
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Total training steps (the run ends when the model reaches this many, across resumes)"
+        required: false
+        default: "4500"
+      max_hours:
+        description: "Stop this run cleanly after N hours, leaving a resumable checkpoint"
+        required: false
+        default: "4.5"
+      resume:
+        description: "Continue from the newest checkpoint artifact instead of starting fresh"
+        type: boolean
+        required: false
+        default: false
+      finetune:
+        description: "Run instruction tuning + evaluation after pretraining"
+        type: boolean
+        required: false
+        default: true
+
+# Two runs writing checkpoints for the same model would race and produce a
+# corpus/checkpoint mismatch, so only one may be in flight at a time. Never
+# cancel a run in progress - that would throw away real training work.
+concurrency:
+  group: train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    # Under GitHub's hard 6h limit with room for setup, evaluation and the
+    # artifact upload after `--max-hours` stops the training loop itself.
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Minerva with the training extra
+        run: pip install -e ".[training,dev]"
+
+      # The corpus is downloaded from its original distributors, never
+      # vendored (see src/minerva/training/data.py). Caching the downloaded
+      # archives keeps repeated runs from re-fetching ~270 MB every time; the
+      # cache key is the corpus definition itself, so editing SOURCES or a
+      # cleaner correctly invalidates it.
+      - name: Cache downloaded corpus archives
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: corpus-${{ hashFiles('src/minerva/training/data.py') }}
+
+      - name: Build the corpus, tokenizer and token bins
+        run: minerva prepare-data --data data
+
+      - name: Fetch the newest checkpoint to resume from
+        if: inputs.resume
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --workflow train.yml --status success \
+            --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run_id" ]; then
+            echo "::error::resume was requested but no successful previous run exists."
+            echo "Run this workflow once with resume=false to create the first checkpoint."
+            exit 1
+          fi
+          echo "Resuming from run $run_id"
+          gh run download "$run_id" --name checkpoints --dir checkpoints
+          test -f checkpoints/swift/last.pt \
+            || { echo "::error::artifact has no checkpoints/swift/last.pt"; exit 1; }
+
+      - name: Pretrain
+        run: |
+          set -euo pipefail
+          resume_args=""
+          if [ -f checkpoints/swift/last.pt ]; then
+            resume_args="--resume checkpoints/swift/last.pt"
+            echo "Continuing from an existing checkpoint."
+          fi
+          minerva train \
+            --data data \
+            --out checkpoints/swift \
+            --steps "${{ inputs.steps }}" \
+            --max-hours "${{ inputs.max_hours }}" \
+            $resume_args
+
+      - name: Evaluate the base model
+        run: minerva evaluate --checkpoint checkpoints/swift/best.pt --data data --json data/eval_report.json
+
+      # Only meaningful once pretraining has actually finished its step
+      # budget - instruction-tuning a half-trained base model produces
+      # numbers that describe nothing. The guard below checks for that
+      # rather than assuming it.
+      - name: Instruction-tune and evaluate
+        if: inputs.finetune
+        run: |
+          set -euo pipefail
+          reached=$(python -c "import json;print(json.load(open('data/eval_report.json'))['steps_trained'])")
+          if [ "$reached" -lt "${{ inputs.steps }}" ]; then
+            echo "::notice::Pretraining stopped at step $reached of ${{ inputs.steps }} (--max-hours)."
+            echo "::notice::Skipping fine-tuning: re-run this workflow with resume=true to continue."
+            exit 0
+          fi
+          minerva finetune \
+            --base checkpoints/swift/best.pt \
+            --tokenizer data/tokenizer.json \
+            --out checkpoints/swift-instruct
+          minerva evaluate-instruct --model swift-instruct --json data/instruct_eval_report.json
+
+      # if: always() - a run that crashed or hit --max-hours still holds real
+      # training progress, and losing it would mean starting over.
+      - name: Upload checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoints
+          path: |
+            checkpoints/**/*.pt
+            checkpoints/**/training_log.jsonl
+            checkpoints/**/run_config.json
+            checkpoints/**/finetune_report.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports
+          path: |
+            data/eval_report.json
+            data/instruct_eval_report.json
+            data/manifest.json
+          if-no-files-found: warn
+          retention-days: 90

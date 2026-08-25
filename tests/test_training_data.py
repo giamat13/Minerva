@@ -16,6 +16,7 @@ from minerva.training.data import (
     SOURCES,
     _chunk_document,
     _clean_benyehuda,
+    _clean_brown,
     _clean_europarl,
     _clean_generic,
     _clean_gutenberg,
@@ -43,8 +44,11 @@ class TestSourceCatalogue:
         assert len(names) >= 4, "at least four distinct registers"
 
     def test_degraded_corpora_are_not_included(self) -> None:
+        # Brown WAS rejected for its POS-tag formatting, then re-included once
+        # _clean_brown made that a solved problem - see the module docstring's
+        # "Added back in v0.3.0" section. Only the still-genuinely-rejected
+        # sources belong in this test now.
         names = {source.name for source in SOURCES}
-        assert "brown" not in names, "POS-tagged text was rejected on quality grounds"
         assert "movie_reviews" not in names, "lowercased pre-tokenised text was rejected"
 
     def test_general_knowledge_and_event_sources_are_not_included(self) -> None:
@@ -92,6 +96,44 @@ class TestEuroparlCleaner:
         cleaned = _clean_europarl(raw)
         assert "<SPEAKER" not in cleaned
         assert "I declare the session resumed." in cleaned
+
+
+class TestBrownCleaner:
+    def test_pos_tags_are_stripped(self) -> None:
+        raw = "The/at Fulton/np-tl County/nn-tl Grand/jj-tl Jury/nn-tl said/vbd Friday/nr ./."
+        cleaned = _clean_brown(raw)
+        assert "/at" not in cleaned
+        assert "/vbd" not in cleaned
+        assert cleaned == "The Fulton County Grand Jury said Friday."
+
+    def test_no_space_creeps_in_before_punctuation(self) -> None:
+        # This is exactly why Brown was rejected before v0.3.0's _clean_brown:
+        # a naive "join words with spaces" detokenizer puts a space in front
+        # of every comma and period.
+        raw = "He/pps said/vbd hello/nn ,/, then/rb left/vbd ./."
+        cleaned = _clean_brown(raw)
+        assert " ," not in cleaned
+        assert " ." not in cleaned
+        assert cleaned == "He said hello, then left."
+
+    def test_quote_tag_pair_becomes_a_real_paired_quote(self) -> None:
+        raw = '``/`` no/at evidence/nn \'\'/\'\' that/cs anything/nn happened/vbd ./.'
+        cleaned = _clean_brown(raw)
+        assert cleaned.count('"') == 2
+        assert cleaned == '"no evidence" that anything happened.'
+
+    def test_a_quote_immediately_followed_by_a_comma_has_no_stray_space(self) -> None:
+        raw = "It/pps was/bedz ``/`` received/vbn ''/'' ,/, he/pps said/vbd ./."
+        cleaned = _clean_brown(raw)
+        assert '" ,' not in cleaned
+        assert cleaned == 'It was "received", he said.'
+
+    def test_contractions_stay_a_single_token(self) -> None:
+        # Brown distributes these already joined ("didn't/dod*", not two
+        # tokens), so no reassembly is needed - just confirm de-tagging
+        # doesn't split them.
+        raw = "He/pps didn't/dod* want/vb it/ppo ./."
+        assert "didn't" in _clean_brown(raw)
 
 
 class TestBenyehudaCleaner:

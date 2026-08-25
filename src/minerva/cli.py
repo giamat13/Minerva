@@ -11,6 +11,7 @@
     minerva evaluate-instruct           measure an instruction-tuned model
     minerva ask "..." [-t mi]           one question, one answer
     minerva chat [-t mi]                interactive conversation
+    minerva serve                       local web chat UI
 
 Built on :mod:`argparse` so it has no dependencies beyond the stdlib.
 """
@@ -311,6 +312,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         ("--max-hours", args.max_hours),
         ("--threads", args.threads),
         ("--resume", args.resume),
+        ("--checkpoint-interval", args.checkpoint_interval),
     ):
         if value is not None:
             forwarded += [flag, str(value)]
@@ -450,6 +452,15 @@ def cmd_chat(args: argparse.Namespace) -> int:
         print()
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the local web chat UI."""
+    from .webui import serve
+
+    config = _config_from_args(args)
+    serve(model_name=args.model, host=args.bind, port=args.port, config=config)
+    return 0
+
+
 # --------------------------------------------------------------------------
 # Streaming output
 # --------------------------------------------------------------------------
@@ -567,6 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--max-hours", type=float, default=None)
     train.add_argument("--threads", type=int, default=None)
     train.add_argument("--resume", type=Path, default=None)
+    train.add_argument("--checkpoint-interval", type=int, default=None)
     train.set_defaults(func=cmd_train)
 
     evaluate = sub.add_parser(
@@ -609,11 +621,27 @@ def build_parser() -> argparse.ArgumentParser:
     chat = sub.add_parser("chat", parents=[common, generation], help="interactive conversation")
     chat.set_defaults(func=cmd_chat)
 
+    serve = sub.add_parser("serve", parents=[common], help="run a local web chat UI")
+    serve.add_argument("-m", "--model", help="Minerva model name (default: swift-instruct)")
+    serve.add_argument("--bind", default="127.0.0.1", help="address the web UI listens on")
+    serve.add_argument("--port", type=int, default=8420)
+    serve.set_defaults(func=cmd_serve)
+
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for the ``minerva`` command."""
+    # Hebrew is a first-class training language (see training/data.py), so
+    # anything Minerva prints - a chat reply, a training sample, a doctor
+    # report - can contain it. A Windows console or a redirected-to-file
+    # stream defaults to the system code page (e.g. cp1252), which cannot
+    # encode Hebrew and raises UnicodeEncodeError, killing the process
+    # mid-command. Force UTF-8 here, once, for every command.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

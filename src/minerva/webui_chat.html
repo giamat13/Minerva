@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Minerva chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light dark;
+    /* Ink and parchment: Minerva is wisdom and craft, not a SaaS dashboard. */
+    --bg: #f4efe3; --panel: #fffdf8; --text: #241f2e; --muted: #7c7288;
+    --border: #e3d9c4; --accent: #4a3268; --accent-hover: #3a2652; --accent-fg: #fbf7ee;
+    --brass: #a3720f; --brass-fg: #2a1c00;
+    --bubble-user: var(--accent); --bubble-user-fg: #fbf7ee;
+    --bubble-bot: #efe7d4; --bubble-bot-fg: #241f2e;
+    --error: #a3291f;
+    --shadow: 0 1px 2px rgba(36, 24, 8, 0.06), 0 8px 24px rgba(36, 24, 8, 0.07);
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #18151f; --panel: #221d2c; --text: #f1ead9; --muted: #a99bb8;
+      --border: #382f47; --accent: #9c82d6; --accent-hover: #b09eea; --accent-fg: #1a1424;
+      --brass: #d9a72c; --brass-fg: #241900;
+      --bubble-bot: #2b2536; --bubble-bot-fg: #f1ead9;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 var(--sans);
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: var(--panel); display: flex; align-items: center;
+    gap: 10px; flex-wrap: wrap; box-shadow: var(--shadow); z-index: 1;
+  }
+  .mark { font-size: 18px; flex: none; }
+  header h1 {
+    font: 650 17px/1 var(--display); margin: 0; letter-spacing: 0.01em; color: var(--text);
+  }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .controls {
+    margin-inline-start: auto; display: flex; gap: 14px;
+    align-items: center; flex-wrap: wrap;
+  }
+  button {
+    font: inherit; background: var(--panel); color: var(--text); cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled, textarea:disabled { opacity: 0.55; cursor: default; }
+  label.toggle {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 13px; color: var(--muted);
+  }
+
+  /* The signature control: Swift's thinking level as a real solfege staff -
+     do re mi fa sol la si, climbing pitch left to right - not a generic
+     dropdown. See thinking.py; this is the one place that architecture is
+     made visible instead of just documented. */
+  .scale {
+    position: relative; display: flex; align-items: flex-end; gap: 6px;
+    padding-bottom: 6px;
+  }
+  .scale::before {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 6px;
+    height: 1px; background: var(--border);
+  }
+  .note {
+    width: 26px; height: 26px; border-radius: 50%; flex: none; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; text-transform: lowercase;
+    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+    position: relative; z-index: 1; transition: transform 0.15s, background 0.15s, color 0.15s;
+  }
+  .note:hover { border-color: var(--accent); color: var(--text); }
+  .note[aria-pressed="true"] {
+    background: var(--brass); border-color: var(--brass); color: var(--brass-fg);
+    transform: scale(1.15);
+  }
+  #log {
+    flex: 1; overflow-y: auto; padding: 22px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .empty {
+    margin: auto; text-align: center; color: var(--muted); font-size: 13px;
+    max-width: 340px; line-height: 1.7;
+  }
+  .empty .mark { display: block; font-size: 30px; margin-bottom: 10px; }
+  .msg { max-width: 70%; display: flex; flex-direction: column; gap: 4px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.bot { align-self: flex-start; align-items: flex-start; }
+  .msg.error { align-self: center; max-width: 90%; }
+  .msg.bot.typing .bubble { display: flex; gap: 4px; align-items: center; padding: 12px 14px; }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+    animation: pulse 1.2s infinite ease-in-out;
+  }
+  .dot:nth-child(2) { animation-delay: 0.15s; }
+  .dot:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+  .bubble {
+    padding: 9px 13px; border-radius: 14px; box-shadow: var(--shadow);
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .msg.user .bubble {
+    background: var(--bubble-user); color: var(--bubble-user-fg);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.bot .bubble {
+    background: var(--bubble-bot); color: var(--bubble-bot-fg);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.error .bubble {
+    background: transparent; color: var(--error); border: 1px solid var(--error);
+    box-shadow: none;
+  }
+  .meta { font-size: 11px; color: var(--muted); padding: 0 4px; }
+  .thinking {
+    font-size: 12px; color: var(--muted); font-style: italic;
+    border-inline-start: 2px solid var(--brass); padding-inline-start: 8px;
+    white-space: pre-wrap; max-width: 70%;
+  }
+  .tool-call {
+    font-size: 12px; color: var(--muted); background: var(--panel);
+    border: 1px dashed var(--border); border-radius: 10px; padding: 7px 11px;
+    max-width: 70%;
+  }
+  .tool-call b { color: var(--text); }
+  .stats-card {
+    align-self: center; max-width: 420px; width: 100%;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); padding: 14px 16px; font-size: 13px;
+  }
+  .stats-section {
+    margin: 10px 0 4px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--muted);
+  }
+  .stat-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 3px 0; border-bottom: 1px dotted var(--border);
+  }
+  .stat-row:last-of-type { border-bottom: none; }
+  .stat-pct { font-weight: 700; color: var(--brass); }
+  .stats-note { margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .stats-headline {
+    margin: 12px 0 4px; padding: 12px; border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--border); text-align: center;
+  }
+  .stats-headline-pct {
+    font: 700 30px/1 var(--display); color: var(--brass);
+  }
+  .stats-headline-label {
+    margin-top: 5px; font-size: 12px; color: var(--muted); line-height: 1.4;
+  }
+  #composer {
+    display: flex; gap: 8px; padding: 14px 18px;
+    border-top: 1px solid var(--border); background: var(--panel);
+  }
+  #input {
+    flex: 1; resize: none; font: inherit; padding: 10px 14px;
+    border-radius: 12px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text);
+    transition: border-color 0.15s;
+  }
+  #input:focus { outline: none; border-color: var(--accent); }
+  #send {
+    background: var(--accent); color: var(--accent-fg);
+    border-color: var(--accent); padding: 0 20px; font-weight: 600;
+    border-radius: 12px;
+  }
+  #send:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .hint { font-size: 11px; color: var(--muted); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    .dot, .note { animation: none; transition: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="mark" aria-hidden="true">&#129417;</span>
+  <h1 id="title">Minerva</h1>
+  <span class="sub" id="subtitle"></span>
+  <div class="controls">
+    <div class="toggle">thinking
+      <div class="scale" id="thinking" role="radiogroup" aria-label="thinking level"></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="reveal"> reveal reasoning</label>
+    <button id="reset">New chat</button>
+  </div>
+</header>
+<div id="log"></div>
+<div id="composer">
+  <textarea id="input" rows="1"
+    placeholder="Ask Swift something... (Enter to send, Shift+Enter for a new line)"></textarea>
+  <button id="send">Send</button>
+</div>
+
+<script>
+const HEBREW = /[֐-׿]/;
+const sessionId = (() => {
+  let id = localStorage.getItem("minerva-session-id");
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem("minerva-session-id", id); }
+  return id;
+})();
+
+const log = document.getElementById("log");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const thinkingScale = document.getElementById("thinking");
+const reveal = document.getElementById("reveal");
+let info = null;
+let selectedThinking = null;
+
+// The rendered transcript is persisted per-session so a page reload doesn't
+// lose it - the server's Session already remembers the conversation for
+// generation purposes; this just keeps what the user sees in sync with that.
+const transcriptKey = "minerva-transcript-" + sessionId;
+let transcript = [];
+try {
+  transcript = JSON.parse(localStorage.getItem(transcriptKey) || "[]");
+} catch { transcript = []; }
+
+function persist() {
+  try { localStorage.setItem(transcriptKey, JSON.stringify(transcript)); } catch {}
+}
+
+function dirFor(text) { return HEBREW.test(text) ? "rtl" : "ltr"; }
+
+function renderBubble(role, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.dir = dirFor(text);
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap;
+}
+
+function renderMeta(wrap, text) {
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = text;
+  wrap.appendChild(meta);
+}
+
+function renderThinking(text) {
+  const el = document.createElement("div");
+  el.className = "thinking";
+  el.dir = dirFor(text);
+  el.textContent = text;
+  log.appendChild(el);
+}
+
+function renderToolCalls(calls) {
+  for (const call of calls) {
+    const el = document.createElement("div");
+    el.className = "tool-call";
+    const args = JSON.stringify(call.arguments);
+    const status = call.is_error ? " (error)" : "";
+    el.innerHTML = "<b>&#128295; " + call.name + "</b>" + status + "<br>" + args;
+    log.appendChild(el);
+  }
+}
+
+function statRow(label, pct) {
+  if (pct === undefined || pct === null) return "";
+  return '<div class="stat-row"><span>' + label + '</span>' +
+    '<span class="stat-pct">' + pct + '%</span></div>';
+}
+
+// DEVDEBUG: a real capability report, read straight from the JSON files
+// `minerva evaluate` / `minerva evaluate-instruct` write - not anything the
+// UI invents. See CLAUDE.md's rule that these files must be regenerated
+// after every retrain, or this panel reports a model that no longer exists.
+function renderStats(data) {
+  const el = document.createElement("div");
+  el.className = "stats-card";
+  let html = "<b>Swift capability report</b>";
+  if (data.base) {
+    const b = data.base;
+    html += '<div class="stats-section">Base model</div>' +
+      '<div class="stat-row"><span>held-out loss</span><span>' + b.val_loss + '</span></div>' +
+      '<div class="stat-row"><span>perplexity</span><span>' + b.val_perplexity + '</span></div>' +
+      '<div class="stat-row"><span>bits/byte</span><span>' + b.bits_per_byte + '</span></div>' +
+      '<div class="stat-row"><span>parameters</span><span>' +
+        b.parameters.toLocaleString() + '</span></div>' +
+      '<div class="stat-row"><span>steps trained</span><span>' + b.steps_trained + '</span></div>';
+  } else {
+    html += '<div class="stats-section">Base model: no report found</div>';
+  }
+  if (data.instruct) {
+    const s = data.instruct;
+    html += '<div class="stats-headline">' +
+      '<div class="stats-headline-pct">' + s.final_answer_accuracy_pct + '%</div>' +
+      '<div class="stats-headline-label">answers that were actually correct '+
+      'and relevant to what was asked</div></div>' +
+      '<div class="stats-section">Instruct (' + s.cases + ' held-out cases)</div>' +
+      statRow("routing accuracy", s.routing_accuracy_pct) +
+      statRow("tool name accuracy", s.tool_name_accuracy_pct) +
+      statRow("argument accuracy", s.argument_accuracy_pct) +
+      statRow("final answer correct", s.final_answer_accuracy_pct) +
+      statRow("honest refusal", s.honest_refusal_pct);
+  } else {
+    html += '<div class="stats-section">Instruct: no report found</div>';
+  }
+  html += '<div class="stats-note">From data/eval_report.json and ' +
+    'data/instruct_eval_report.json - regenerate with minerva evaluate / ' +
+    'evaluate-instruct after retraining.</div>';
+  el.innerHTML = html;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function showStats() {
+  addEvent({ type: "user", text: "DEVDEBUG" });
+  try {
+    const res = await fetch("/api/stats");
+    const data = await res.json();
+    addEvent({ type: "stats", data });
+  } catch (err) {
+    addEvent({ type: "error", text: "Could not load stats: " + (err.message || err) });
+  }
+}
+
+// One `render` covers both a live turn and replaying a persisted one, so the
+// two paths can never drift apart.
+function render(ev) {
+  if (ev.type === "user") { renderBubble("user", ev.text); return; }
+  if (ev.type === "error") { renderBubble("error", ev.text); return; }
+  if (ev.type === "stats") { renderStats(ev.data); return; }
+  if (ev.type === "bot") {
+    if (reveal.checked && ev.thinking) renderThinking(ev.thinking);
+    if (ev.toolCalls && ev.toolCalls.length) renderToolCalls(ev.toolCalls);
+    const wrap = renderBubble("bot", ev.text);
+    if (ev.meta) renderMeta(wrap, ev.meta);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function addEvent(ev) {
+  const empty = log.querySelector(".empty");
+  if (empty) empty.remove();
+  transcript.push(ev);
+  persist();
+  render(ev);
+}
+
+let typingEl = null;
+function showTyping() {
+  typingEl = renderBubble("bot", "…");
+  typingEl.classList.add("typing");
+}
+function hideTyping() {
+  if (typingEl) { typingEl.remove(); typingEl = null; }
+}
+
+function selectNote(name) {
+  selectedThinking = name;
+  for (const btn of thinkingScale.children) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.name === name));
+  }
+}
+
+async function loadInfo() {
+  const res = await fetch("/api/info");
+  info = await res.json();
+
+  // The server's Session memory is in-process only. If it restarted since
+  // this browser last talked to it, the transcript we have locally is
+  // history the model can no longer see - clear it rather than show a
+  // conversation that would silently lose context on the next message.
+  const instanceKey = "minerva-server-instance";
+  if (localStorage.getItem(instanceKey) !== info.instance_id) {
+    localStorage.setItem(instanceKey, info.instance_id);
+    transcript = [];
+    persist();
+    log.innerHTML = "";
+  }
+
+  document.getElementById("title").textContent = info.display_name;
+  const bits = [];
+  if (info.parameter_count) bits.push(info.parameter_count);
+  if (!info.supports_thinking) bits.push("no reasoning phase");
+  if (info.supports_tools) bits.push("tools enabled");
+  document.getElementById("subtitle").textContent = bits.join(" · ");
+
+  thinkingScale.innerHTML = "";
+  info.levels.forEach((level, i) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "note";
+    btn.dataset.name = level.name;
+    btn.textContent = level.name;
+    btn.style.marginBottom = (i * 3) + "px";
+    btn.title = level.name + " (" + level.hebrew + ") - " + level.description;
+    btn.addEventListener("click", () => selectNote(level.name));
+    thinkingScale.appendChild(btn);
+  });
+  selectNote(info.default_thinking);
+  if (!info.supports_thinking) {
+    thinkingScale.title =
+      info.display_name + " has no reasoning phase; every level resolves to do.";
+  }
+}
+
+function setBusy(busy) {
+  input.disabled = busy;
+  sendBtn.disabled = busy;
+  sendBtn.textContent = busy ? "..." : "Send";
+}
+
+async function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  input.style.height = "auto";
+
+  if (text.toUpperCase() === "DEVDEBUG") {
+    showStats();
+    return;
+  }
+
+  addEvent({ type: "user", text });
+
+  setBusy(true);
+  showTyping();
+  let data;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message: text, thinking: selectedThinking }),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  } catch (err) {
+    hideTyping();
+    setBusy(false);
+    addEvent({ type: "error", text: String(err.message || err) });
+    input.focus();
+    return;
+  }
+  hideTyping();
+  setBusy(false);
+
+  const eff = data.effective_thinking;
+  let metaText = "thinking: " + eff.name + " (" + eff.hebrew + ")";
+  if (data.requested_thinking && data.requested_thinking !== eff.name) {
+    metaText = "requested " + data.requested_thinking + " → " + metaText +
+      " - " + info.display_name + " ignores levels above its ceiling";
+  }
+  metaText += "  ·  " + data.duration_seconds + "s";
+
+  addEvent({
+    type: "bot",
+    text: data.answer,
+    thinking: data.thinking,
+    toolCalls: data.tool_calls,
+    meta: metaText,
+  });
+  input.focus();
+}
+
+document.getElementById("send").addEventListener("click", send);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 160) + "px";
+});
+function renderInitialLog() {
+  log.innerHTML = "";
+  if (transcript.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.innerHTML = '<span class="mark">&#129417;</span>Ask Swift something to start. ' +
+      "It is small, honest about what it does not know, and reaches for a tool rather than guessing.";
+    log.appendChild(empty);
+  } else {
+    for (const ev of transcript) render(ev);
+  }
+  input.focus();
+}
+
+document.getElementById("reset").addEventListener("click", async () => {
+  await fetch("/api/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  transcript = [];
+  persist();
+  renderInitialLog();
+});
+
+// loadInfo() may clear a stale transcript (server restarted since our last
+// visit) before the very first render, so the initial render waits for it -
+// otherwise it would briefly paint history the server no longer remembers.
+loadInfo().then(renderInitialLog);
+</script>
+</body>
+</html>

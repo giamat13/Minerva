@@ -56,32 +56,53 @@ The whole pipeline is in this repository and reproducible in three commands.
 
 ```bash
 minerva prepare-data     # real corpus -> BPE tokenizer -> token bins
-minerva train            # stage 1: pretrain from scratch      (~99 min, CPU)
-minerva finetune         # stage 2: teach it to hold a chat    (2 min, CPU)
+minerva train            # stage 1: pretrain from scratch      (~90 min, CPU)
+minerva finetune         # stage 2: teach it to hold a chat    (~1.5 min, CPU)
 minerva ask "What is 17 times 43?"
 ```
 
-**1. The corpus** — ~50.8 MB of real, human-written prose across eight sources:
-Project Gutenberg literature, Reuters newswire, European Parliament debate, US
-political oratory, informal web text, Simple English Wikipedia, and — new in
-v0.2.0 — **curated Hebrew literature** from Project Ben-Yehuda. Every source is
-downloaded from its original distributor with its licence and origin recorded
-in a generated `manifest.json`. Nothing is templated, generated or augmented.
+**1. The corpus** — 42.33 MB of real, human-written prose across seven
+sources: Project Gutenberg literature, the Brown corpus (short-declarative
+press and fiction), European Parliament debate, US political oratory,
+informal web text, and **curated Hebrew literature** from Project Ben-Yehuda
+(added in v0.2.0). Every source is downloaded from its original distributor
+with its licence and origin recorded in a generated `manifest.json`. Nothing
+is templated, generated or augmented.
+
+**v0.3.0 removed Simple English Wikipedia and Reuters newswire** — not for
+quality, for capability: Swift is 9.9M parameters, with nowhere to reliably
+store "the capital of X" or "what happened on date Y". Training on dense
+factual text doesn't give a model that size the capacity to recall facts, it
+gives it fluent confabulation — a wrong answer stated exactly as confidently
+as a right one. [`web_search`](#tools) is the honest replacement: the model
+looks a fact up in a real, live search instead of guessing at one it was
+never big enough to remember correctly. Full reasoning in
+[`src/minerva/training/data.py`](src/minerva/training/data.py)'s module
+docstring.
+
+Removing those two sources cost more than their facts, though, and this
+project measured the cost rather than guessing at it: they were also the
+corpus's only short, declarative, factual-*register* prose. A retrain without
+them produced a base model whose finetune scored far below every earlier
+round (routing accuracy fell from the 90s into the 60–70% range). The fix was
+the **Brown corpus**, added back for exactly that register — rejected in
+v0.1.0/v0.2.0 only for a fixable formatting reason (it is distributed
+POS-tagged), never for its content, which is 1961 American press and fiction:
+old and general enough in subject to teach sentence structure without being a
+database of facts worth memorising. Full story, numbers included, in
+[`docs/TRAINING.md`](docs/TRAINING.md#5c-the-run-that-produced-swift-v030--removing-facts-restoring-register).
 
 The Hebrew source is Project Ben-Yehuda's public-domain library — the Hebrew
 analogue of Project Gutenberg — curated to seven canonical authors (Bialik,
 Rachel Bluwstein, Brenner, Ahad Ha'am, Mendele Mocher Sforim, Tchernichovsky,
-Frishman) and filtered to their *original*, non-translated work. Both new
-sources were found via [Hugging Face Datasets](https://huggingface.co/datasets),
-reviewed by hand, and pinned to a specific revision, per `CLAUDE.md`'s rules for
-using it as a source. Three other real candidates (a Hebrew web scrape, a
-GPL-3.0 religious-text library, and full English Wikipedia) were reviewed and
-rejected — the reasons are in [`docs/TRAINING.md`](docs/TRAINING.md).
-
-Two more corpora were **rejected on quality grounds**: the Brown corpus
-(distributed POS-tagged) and Pang & Lee's movie reviews (distributed lowercased
-and pre-tokenised). Volume was not a good enough reason to teach the model
-damaged typography.
+Frishman) and filtered to their *original*, non-translated work. Both it and
+Simple English Wikipedia (while it was still in the corpus) were found via
+[Hugging Face Datasets](https://huggingface.co/datasets), reviewed by hand,
+and pinned to a specific revision, per `CLAUDE.md`'s rules for using it as a
+source. Other real candidates (a Hebrew web scrape, a GPL-3.0 religious-text
+library, full English Wikipedia, and Pang & Lee's lowercased/pre-tokenised
+movie reviews) were reviewed and rejected — the reasons are in
+[`docs/TRAINING.md`](docs/TRAINING.md).
 
 **2. The tokenizer** — a byte-level BPE, implemented here and trained on that
 corpus. 8,192 tokens, all 256 byte values in the base vocabulary (so there is
@@ -330,11 +351,48 @@ one-dependency install.
 ```bash
 minerva ask "It is a truth universally"      # continue a prompt
 minerva ask --no-stream -m swift "The"       # wait for the full continuation
+minerva chat                                 # interactive conversation
+minerva serve                                # local web chat UI on :8420
 minerva models -v                            # the catalogue
 minerva thinking                             # the scale
 minerva doctor                               # is anything actually working?
 minerva train --resume checkpoints/swift/last.pt
 ```
+
+### Web chat UI
+
+`minerva serve` runs a local chat page on `http://127.0.0.1:8420/`, built on
+the standard library's `http.server` — a browser tab is friendlier than a
+terminal, but it does not earn Minerva a web framework. Multi-turn memory,
+a thinking-level selector, a reveal-reasoning toggle, RTL-aware bubbles for
+Hebrew, and visible tool calls when the model reaches for one.
+
+Type **`DEVDEBUG`** into the chat box for a capability report: held-out loss
+and perplexity, routing accuracy, tool-name accuracy, argument accuracy,
+final-answer correctness and honest-refusal rate — read straight from
+`data/eval_report.json` and `data/instruct_eval_report.json`, the files
+`minerva evaluate` and `minerva evaluate-instruct` write. Real measured
+numbers, including the unflattering ones.
+
+### Training on GitHub Actions
+
+Training runs on GitHub's free runners without touching a local machine:
+
+```bash
+gh workflow run train.yml                      # start (fresh)
+gh workflow run train.yml -f resume=true       # continue where it stopped
+gh run watch                                   # follow the live log
+gh run download --name checkpoints             # fetch the trained weights
+gh run download --name eval-reports            # fetch the measured numbers
+```
+
+A hosted runner is 2 cores with a hard 6-hour job limit, so training is
+**resumable across runs** rather than one long job: `--max-hours` stops
+cleanly before the limit and leaves a real checkpoint, every run uploads its
+progress as an artifact (`if: always()`, so a crash keeps its work), and
+`resume=true` picks up from the newest one. Re-run with `resume=true` until
+the log prints `finished N steps`. See
+[`.github/workflows/train.yml`](.github/workflows/train.yml).
 
 ### Python
 

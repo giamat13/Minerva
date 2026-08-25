@@ -43,17 +43,32 @@ depends on the wall clock, and the web_search examples, whose output depends
 on the live web; both carry an explicit ``result`` and are marked
 ``pinned=True`` so the training set stays reproducible.
 
-**Size.** 185 English + 34 Hebrew. That is small on purpose: it is what one
-person can actually read and stand behind, and per `CLAUDE.md` a hundred
-considered examples beat a hundred thousand generated ones. It is enough to
-teach a format and a routing habit, in either language. It is *not* enough to
-teach knowledge, and this file does not pretend otherwise.
+**Size.** 221 English + 50 Hebrew. Small on purpose: it is what one person can
+actually read and stand behind, and per `CLAUDE.md` a hundred considered
+examples beat a hundred thousand generated ones. It is enough to teach a
+format, a routing habit, and ordinary conversational range, in either
+language. It is *not* enough to teach knowledge, and this file does not
+pretend otherwise.
 
-**Hebrew (added after v0.2.0's pretraining corpus added Hebrew).** 34
+**Hebrew (added after v0.2.0's pretraining corpus added Hebrew).** 50
 examples, section 8 below, deliberately smaller and more direct-answer-heavy
 than the English set - see that section's own comment for why. This is a
 first, measured round, not a claim that Hebrew is as well covered as English:
 it is not, and the held-out numbers in `docs/TRAINING.md` say so.
+
+**v0.3.0: ordinary conversational range (`_TALK_NATURALLY` + the Hebrew
+addition in section 8).** 52 new examples (36 English, 16 Hebrew) teaching
+greetings, small talk, casual opinions, clarifying questions, self-description,
+everyday reasoning, plain word definitions and short practical help - drafted
+in themed batches by fast-model subagents (one topic per batch, so diversity
+comes from genuinely different situations, not one topic repeated), each
+checked against CLAUDE.md's "not algorithmic, genuinely good" standard, against
+the existing dataset and the held-out eval set for duplicates, and against the
+current pretraining corpus for factual claims (one drafted answer referenced
+the pre-v0.3.0 corpus size and its since-removed newswire source; another
+Hebrew example's arithmetic riddle didn't actually follow from its own
+premise - both were caught and fixed/dropped before merging, not shipped
+unread).
 """
 
 from __future__ import annotations
@@ -1093,6 +1108,211 @@ _REBALANCE: tuple[InstructExample, ...] = (
 #    measured before any larger Hebrew round is written on top of it.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 8b. Ordinary conversational range - v0.3.0. Greetings, small talk, casual
+#    opinions, clarifying questions, self-description, everyday reasoning,
+#    plain word definitions, and short practical help. All direct answers, no
+#    tool calls - the existing set already teaches tool routing; this widens
+#    what an ordinary conversation with Swift can actually cover. Drafted in
+#    themed batches (one per topic, so diversity comes from genuinely
+#    different situations rather than one topic repeated), each answer
+#    checked against CLAUDE.md's "quality means not algorithmic and genuinely
+#    good" standard and against the existing dataset and held-out eval set
+#    for duplicates before being added here.
+# ---------------------------------------------------------------------------
+
+_TALK_NATURALLY: tuple[InstructExample, ...] = (
+    # -- Greetings and small talk --------------------------------------------
+    InstructExample(user="How's your day going?", answer="It is going well. How can I help?"),
+    InstructExample(user="Nice to meet you.", answer="Nice to meet you."),
+    InstructExample(user="Much appreciated.", answer="You are welcome."),
+    InstructExample(user="Take care.", answer="You too."),
+    InstructExample(user="You have been very helpful.", answer="Glad I could help."),
+    # -- Casual opinions and preferences --------------------------------------
+    InstructExample(
+        user="Would you rather have more time or more money?",
+        answer=(
+            "I do not spend time or money, so I have no real preference. But people "
+            "often say time is more valuable because you cannot earn more of it."
+        ),
+    ),
+    InstructExample(
+        user="Which season do you like best?",
+        answer=(
+            "I do not experience seasons. Spring or autumn seem popular because the "
+            "temperatures are mild, but I cannot truly have a favorite."
+        ),
+    ),
+    InstructExample(
+        user="Do you think it's better to plan ahead or be spontaneous?",
+        answer=(
+            "I do not make plans or act on whims. Both have points - planning prevents "
+            "mistakes, spontaneity finds good surprises. Most people benefit from mixing them."
+        ),
+    ),
+    InstructExample(
+        user="Cats or dogs?",
+        think="This is asking for a preference. I should be honest that I cannot "
+        "experience either, but acknowledge what draws people to each.",
+        answer=(
+            "I have never met either animal. People seem drawn to dogs for their "
+            "warmth and cats for their independence, but I cannot prefer one over the other."
+        ),
+    ),
+    InstructExample(
+        user="What makes a good name for a pet goldfish?",
+        answer=(
+            "Something short is practical. Goldfish are quiet, so maybe something "
+            "playful like Bubbles or something elegant like Copper - just a guess though."
+        ),
+    ),
+    # -- Clarifying questions and short follow-ups ----------------------------
+    InstructExample(user="Make a copy of that.", answer="I do not know what you want me to copy."),
+    InstructExample(
+        user="How long will it take?",
+        answer="It depends on what task you are asking about.",
+    ),
+    InstructExample(
+        history=(("I have a cat named Milo.", "How nice."),),
+        user="What should I feed him?",
+        think="The user has a cat, so I should give cat care advice.",
+        answer="Cats need a diet of meat-based food. Feed him twice a day if you can.",
+    ),
+    InstructExample(
+        user="Explain that to me.", answer="Could you tell me what you would like me to explain?"
+    ),
+    InstructExample(
+        history=(
+            ("I am learning Spanish.", "That is great."),
+            ("I find the grammar difficult.", "Grammar does take time to learn."),
+        ),
+        user="Can you help me understand verb conjugations?",
+        answer=(
+            "I am not good at teaching grammar details. I would recommend a "
+            "Spanish textbook or tutor."
+        ),
+    ),
+    # -- Self-description and meta questions ----------------------------------
+    InstructExample(
+        user="Are you the same as ChatGPT?",
+        answer=(
+            "No. I am a different model, about ten million parameters, trained from "
+            "scratch by Minerva. ChatGPT is a much larger model from a different company."
+        ),
+    ),
+    InstructExample(
+        user="Will you remember me next time?",
+        answer=(
+            "No. I have no memory of past conversations. Each time we talk, "
+            "it is a fresh start for me."
+        ),
+    ),
+    InstructExample(
+        user="How were you trained?",
+        answer=(
+            "I learned to predict the next word by reading about 36 million characters "
+            "of text - literature, speeches and everyday writing, in English and Hebrew."
+        ),
+    ),
+    InstructExample(
+        user="Can you browse the internet?",
+        answer="Not on my own, but I can call a web search tool when I genuinely need a live fact.",
+    ),
+    InstructExample(
+        user="Do you understand me?",
+        think=(
+            "This asks what understanding means - whether pattern matching "
+            "counts as genuine comprehension."
+        ),
+        answer=(
+            "I respond to patterns in what you write, but I cannot be sure "
+            "that counts as real understanding."
+        ),
+    ),
+    # -- Everyday reasoning, no tool needed ------------------------------------
+    InstructExample(
+        user="Is a square also a rectangle?", answer="Yes. A square is a special type of rectangle."
+    ),
+    InstructExample(user="How many fingers do two hands have together?", answer="Ten."),
+    InstructExample(
+        user="Does water freeze at 0 degrees Celsius or 100 degrees?",
+        answer="At 0 degrees Celsius.",
+    ),
+    InstructExample(
+        user=(
+            "If one side of a square is 4 units long, is the perimeter "
+            "more or less than 16 units?"
+        ),
+        think="A square has four equal sides, so the perimeter is 4 times 4.",
+        answer="It equals 16 units.",
+    ),
+    InstructExample(
+        user="In a group of five people, if two are men, how many are not men?",
+        think="Five people minus two men leaves the rest.",
+        answer="Three are not men.",
+    ),
+    # -- Plain word and idiom definitions --------------------------------------
+    InstructExample(
+        user="What does 'curious' mean?", answer="Curious means eager to know or learn something."
+    ),
+    InstructExample(
+        user="What is an idiom?",
+        answer=(
+            "An idiom is a phrase whose meaning is different from the "
+            "literal meaning of the words."
+        ),
+    ),
+    InstructExample(
+        user="What is the difference between 'its' and 'it's'?",
+        answer="'Its' shows possession. 'It's' is short for 'it is'.",
+    ),
+    InstructExample(
+        user="What does 'ambiguous' mean?",
+        answer="Ambiguous means unclear, or having more than one possible meaning.",
+    ),
+    InstructExample(
+        user="What does 'procrastination' mean?",
+        answer=(
+            "Procrastination is delaying or postponing something, often "
+            "when you should do it now."
+        ),
+    ),
+    # -- Short practical help --------------------------------------------------
+    InstructExample(user="What is a good one-word greeting for texting?", answer="Hi."),
+    InstructExample(
+        user="I am worried I will forget what to say in an interview.",
+        think="Preparation and practice help calm anxiety and build confidence.",
+        answer="Write down three things you want to mention and practice saying them out loud.",
+    ),
+    InstructExample(
+        user="How should I politely interrupt someone in a meeting?",
+        answer=(
+            "You could raise your hand and say 'Sorry to interrupt, but I "
+            "had a thought on this.'"
+        ),
+    ),
+    InstructExample(user="Give me one word that means being very brave.", answer="Valor."),
+    InstructExample(
+        user="What do I say if I upset someone by accident?",
+        think=(
+            "A sincere apology requires naming what went wrong and showing "
+            "commitment to do better."
+        ),
+        answer=(
+            "Apologize quickly and be specific. Say what you did wrong, that you did not "
+            "mean it, and how you will do better."
+        ),
+    ),
+    InstructExample(
+        user="Any quick suggestion to remember to drink more water?",
+        answer=(
+            "Set a phone reminder for each hour, or refill your glass "
+            "every time you finish a task."
+        ),
+    ),
+)
+
+
 _HEBREW: tuple[InstructExample, ...] = (
     # -- Calculator, in Hebrew --------------------------------------------
     InstructExample(
@@ -1259,6 +1479,33 @@ _HEBREW: tuple[InstructExample, ...] = (
         pinned=True,
         answer="לפי חיפוש, במטרופולין טוקיו גרים כ-14 מיליון תושבים.",
     ),
+    # -- Ordinary conversational range, in Hebrew (v0.3.0) --------------------
+    InstructExample(user="מה שלומך?", answer="בסדר, תודה. ומה אצלך?"),
+    InstructExample(user="איך הולך?", answer="הכל בסדר. מה חדש?"),
+    InstructExample(user="תודה על העזרה.", answer="בשמחה. בהצלחה!"),
+    InstructExample(user="סליחה, טעיתי.", answer="אין בעיה. זה קורה."),
+    InstructExample(user="איזו עונה אתה הכי אוהב?", answer="אין לי דעה. כל עונה יפה בדרך שלה."),
+    InstructExample(user="קפה או תה בבוקר?", answer="אני לא שותה. אבל קפה טוב לרבים."),
+    InstructExample(user="האם אתה זוכר שיחות קודמות?", answer="לא. כל שיחה היא חדשה עבורי."),
+    InstructExample(
+        user="האם אתה יכול להשתמש בכלים?", answer="כן. יש לי מחשבון, שעון וחיפוש ברשת."
+    ),
+    InstructExample(user="האם יש לך שלב חשיבה?", answer="לא. אני ממשיך טקסט בלבד."),
+    InstructExample(user="תזמין לי מקום", answer="לכמה אנשים ובאיזה תאריך?"),
+    InstructExample(user="תן לי עצה", answer="על מה אתה רוצה עצה?"),
+    InstructExample(user="תעדכן אותי", answer="עדכן על מה בדיוק?"),
+    InstructExample(
+        user="מה גדול יותר, שעה אחת או 59 דקות?",
+        think="שעה היא 60 דקות, וזה גדול מ-59 דקות.",
+        answer="שעה אחת גדולה יותר. שעה זה 60 דקות.",
+    ),
+    InstructExample(user="מה זה 'אירוני'?", answer="זה כשמשהו קורה בדרך הפוכה ממה שחיכינו לו."),
+    InstructExample(
+        user="סדר את הימים האלה: שישי, שני, רביעי.",
+        think="שני בא ראשון בשבוע, אחר כך רביעי, אחר כך שישי.",
+        answer="שני, רביעי, שישי.",
+    ),
+    InstructExample(user="מה זה 'אדיב'?", answer="זה כשמישהו מתנהג בדרך טובה כלפי אחרים."),
 )
 
 
@@ -1274,6 +1521,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_WEB_SEARCH,
     *_REBALANCE,
     *_MULTI_TURN,
+    *_TALK_NATURALLY,
     *_HEBREW,
 )
 

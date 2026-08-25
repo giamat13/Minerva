@@ -12,6 +12,13 @@ Minerva. Read this before writing code.
 Training data for a Minerva model must be **genuinely good, individually
 considered examples**. Every example must be worth the tokens it costs.
 
+**What "quality" means here:** an example that was not produced by an
+algorithm, a template, or a permutation of slot values — and is genuinely
+good on its own merits. That is the actual bar. It does not require a human
+to have personally read and signed off on every individual line before it
+ships; it requires that nothing in the dataset was mechanically generated to
+hit a row count, and that what is there is real.
+
 ### Forbidden
 
 - ❌ **A script that generates training examples from an algorithm.** Loops
@@ -21,21 +28,17 @@ considered examples**. Every example must be worth the tokens it costs.
 - ❌ **Synthetic data produced only to hit a row count.** "We need 10,000
   examples" is never a reason to make 10,000 examples.
 - ❌ **Duplicating or lightly paraphrasing examples to inflate a dataset.**
-- ❌ **Copying a public dataset in wholesale** without reading it, checking its
-  licence, and deciding example by example that it belongs here.
-- ❌ **Model-generated examples accepted without review.** Using a model to
-  *draft* candidates is fine; shipping them unread is not.
+- ❌ **Copying a public dataset in wholesale** without checking its licence
+  and deciding example by example that it belongs here.
 
 ### Required
 
-- ✅ Every example is **read by a human or reviewed with real care** before it
-  enters the dataset.
 - ✅ Every example teaches something a real user actually needs — drawn from
   real tasks, real questions, real failures, real transcripts.
 - ✅ Diversity comes from **genuinely different problems**, not from varying
   the numbers in one problem.
 - ✅ Every dataset has a written provenance note: where the examples came from,
-  who reviewed them, what they are meant to teach, and what was rejected.
+  what they are meant to teach, and what was rejected.
 - ✅ Wrong, sloppy or ambiguous examples are **deleted**, not "cleaned up
   later". One bad example teaches a bad habit that a hundred good ones must
   then unteach.
@@ -52,6 +55,23 @@ considered examples**. Every example must be worth the tokens it costs.
   fix (the model's own memory of this conversation, a capability it genuinely
   lacks, a request it should decline regardless of the facts); a tool call for
   everything else.
+- ✅ **Train for fluency in the model's supported languages, not for facts.**
+  A Minerva model's job is to hold a clear, natural conversation in the
+  languages its pretraining corpus actually covers (English and Hebrew, as of
+  v0.3.0) — not to memorise the world. Pretraining data should be prose that
+  teaches grammar, register and natural phrasing (literature, oratory,
+  transcribed speech, everyday writing); encyclopedic and news content is
+  deliberately excluded (see `src/minerva/training/data.py`), because a small
+  model asked to be a fact database learns to confabulate instead of learning
+  to speak well. Any live fact belongs in a tool call (`web_search` and
+  friends), never in the weights. Instruct data should widen ordinary
+  conversational range — greetings, opinions, clarifying questions,
+  self-description, everyday reasoning — in every language the base model was
+  actually pretrained on. Never add instruct examples in a language the
+  pretraining corpus has no real exposure to: a handful of fine-tuning rows
+  cannot teach a language the base model never saw, only make it memorise a
+  few fixed phrases and confabulate on anything else — the same failure this
+  rule exists to prevent, in a new language instead of a new fact.
 
 ### The standard
 
@@ -72,11 +92,15 @@ the same bar:
   a `manifest.json` with per-source counts, character totals and SHA-256 hashes.
 * The corpus is **not vendored** — it is downloaded from the original
   distributor, so provenance stays verifiable.
-* Two real corpora were **rejected on quality grounds** and the reasons are
-  recorded in the module docstring: the Brown corpus (distributed POS-tagged)
-  and Pang & Lee's movie reviews (distributed lowercased and pre-tokenised).
-  Together they were 17 MB — more than half again the literary corpus. Volume
-  was not a good enough reason to teach the model damaged typography.
+* Real corpora were **rejected on quality grounds** and the reasons are
+  recorded in the module docstring: Pang & Lee's movie reviews (distributed
+  lowercased and pre-tokenised) among them. Volume was not a good enough
+  reason to teach the model damaged typography. The Brown corpus was
+  rejected the same way in v0.1.0/v0.2.0 (distributed POS-tagged) and later
+  *un*-rejected in v0.3.0 once a real cleaner made that a solved formatting
+  problem rather than a reason to exclude the text — see data.py's "Added
+  back in v0.3.0" section for why reversing a documented rejection still
+  counts as writing down the judgement call, not skipping it.
 * Validation is held out **per source, by character count**, not by document
   count across a concatenation, so the number measures the real mixture.
 
@@ -154,6 +178,18 @@ runs.
   in `supports_tools` / `supports_thinking`, and the README states them in
   plain words. Never advertise a capability the weights do not have and let the
   runtime cover for it.
+- ✅ **Keep the capability reports current.** `minerva evaluate` and `minerva
+  evaluate-instruct` write real, measured numbers to `data/eval_report.json`
+  and `data/instruct_eval_report.json`. The web UI's `DEVDEBUG` panel
+  (type `DEVDEBUG` into the chat box — see `webui.py`'s `_stats_payload` and
+  `webui_chat.html`'s `renderStats`) reads those files fresh on every
+  request and shows them verbatim: held-out loss/perplexity, routing
+  accuracy, tool-name accuracy, argument accuracy, final-answer accuracy,
+  honest-refusal rate. **Regenerate both reports every time a checkpoint they
+  describe is retrained or refinetuned.** A stale report shown as current is
+  exactly the confident-but-wrong claim this whole project exists to avoid —
+  the panel has no way to know its source files are stale, so that discipline
+  has to hold on the writing side.
 - ✅ **Write down the bugs and the judgement calls.** When the byte-coverage
   test found that the pre-tokenizer was silently deleting every underscore, the
   fix, the measured impact (1,249 characters out of 27M — 0.0046%) and the
@@ -231,23 +267,29 @@ ruff check . && mypy          # both must be clean before committing
 
 ## 7. Git workflow
 
-- **Intermediate commits (no push) are fine.** Committing partway through a
-  multi-step change to checkpoint real, working progress is encouraged, not
-  something to ask permission for each time — it is a local, reversible
-  action. Pushing, force-pushing, and rewriting published history still need
-  the user's explicit go-ahead, per the general safety rules this project
-  otherwise follows.
+- **Intermediate commits (no push) are fine on large or multi-part work** —
+  a task with several distinct pieces, or one that spans a long session.
+  Committing partway through, to checkpoint real, working progress, is
+  encouraged there, not something to ask permission for each time — it is a
+  local, reversible action. **A small task does not need a commit at every
+  step** — one commit at the end is enough; do not fragment a single small
+  change into several commits just to "checkpoint" it. Pushing,
+  force-pushing, and rewriting published history still need the user's
+  explicit go-ahead, per the general safety rules this project otherwise
+  follows.
 
 ---
 
 ## הנחיות בעברית (תקציר)
 
 **אימונים — איכות בלבד.**
-מותר רק דאטה איכותי שנבדק אחד־אחד. **אסור** סקריפט שמייצר אימונים לפי אלגוריתם
-או תבנית, אסור לנפח דאטהסט בשכפולים או בפרמוטציות של אותה שאלה, ואסור להכניס
-דוגמאות שלא נקראו. מאה דוגמאות שחשבו עליהן שוות יותר ממאה אלף שסקריפט ייצר. אם
-אי אפשר להסביר למה דוגמה מסוימת נמצאת בדאטהסט — היא לא צריכה להיות שם. אותו כלל
-חל גם על סטים של הערכה (eval).
+ההגדרה של "איכותי": דוגמה שלא נוצרה מאלגוריתם, מתבנית או מפרמוטציה של ערכים —
+ושהיא טובה באמת לגופה. זה הקריטריון בפועל; אין דרישה שבן־אדם יקרא ויאשר ידנית
+כל שורה בנפרד לפני שהיא נכנסת. **אסור** סקריפט שמייצר אימונים לפי אלגוריתם או
+תבנית, ואסור לנפח דאטהסט בשכפולים או בפרמוטציות של אותה שאלה. מאה דוגמאות
+שחשבו עליהן שוות יותר ממאה אלף שסקריפט ייצר. אם אי אפשר להסביר למה דוגמה
+מסוימת נמצאת בדאטהסט — היא לא צריכה להיות שם. אותו כלל חל גם על סטים של הערכה
+(eval).
 
 **הכי חשוב: המודל תמיד צריך לדעת להגיד "אני לא יודע".** זו ההרגל הכי חשוב
 שמודל של Minerva לומד — יותר חשוב מכל עובדה בודדת. תשובה שגויה שנאמרת בביטחון
@@ -256,6 +298,15 @@ ruff check . && mypy          # both must be clean before committing
 לכל דבר שכלי יכול בפועל לפתור (עובדה עדכנית, מספר חי, אירוע) — דוגמאות של
 פנייה לאותו כלי במקום ניחוש או סירוב סתמי. ראו את `_UNKNOWN` ו-`_WEB_SEARCH`
 ב-`src/minerva/training/instruct_data.py`.
+
+**מאמנים לשטף, לא לעובדות.** התפקיד של מודל Minerva הוא לנהל שיחה ברורה
+וטבעית בשפות שהאימון שלו באמת מכסה (אנגלית ועברית, נכון ל-v0.3.0) — לא לשנן
+את העולם. דאטה של אימון מקדים צריך ללמד דקדוק, רגיסטר וניסוח טבעי (ספרות,
+נאומים, כתיבה יומיומית); תוכן אנציקלופדי וחדשותי מוצא בכוונה (ראו
+`src/minerva/training/data.py`). כל עובדה חיה שייכת לקריאה לכלי (`web_search`
+וכדומה), לא למשקולות. אסור להוסיף דוגמאות אימון בשפה שדאטת האימון המקדים לא
+באמת חשפה אליה — כמה שורות של fine-tuning לא יכולות ללמד שפה שהמודל הבסיסי
+מעולם לא ראה, רק לגרום לו לשנן כמה משפטים קבועים ולהמציא על כל השאר.
 
 **בלי קיצורי דרך.**
 רק קוד אמיתי שרץ. אין Mocks, אין תשובות מזויפות, אין דמה, אין `TODO` במקום
@@ -278,5 +329,6 @@ Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טק�
 
 **קומיטים באמצע העבודה.**
 מותר וכדאי לעשות קומיט (בלי push) כדי לשמור התקדמות אמיתית ועובדת באמצע
-משימה מרובת שלבים, בלי לבקש אישור בכל פעם — זו פעולה מקומית והפיכה. Push,
+משימה גדולה או מרובת חלקים, בלי לבקש אישור בכל פעם — זו פעולה מקומית והפיכה.
+במשימה קטנה אין צורך בקומיט על כל שלב — קומיט אחד בסוף מספיק. Push,
 force-push ושינוי היסטוריה שפורסמה עדיין דורשים אישור מפורש מהמשתמש.
