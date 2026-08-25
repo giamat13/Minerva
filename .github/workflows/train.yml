@@ -140,18 +140,27 @@ jobs:
 
       # if: always() - a run that crashed or hit --max-hours still holds real
       # training progress, and losing it would mean starting over.
+      #
+      # `path:` is the whole directory ON PURPOSE, not a set of globs. v4 roots
+      # an artifact at the least common ancestor of the paths it is given, so
+      # globbing `checkpoints/**/*.pt` produces an artifact rooted at
+      # `checkpoints/swift/` while only the base model exists (files land as
+      # `best.pt`), and at `checkpoints/` once fine-tuning has also run (files
+      # land as `swift/best.pt`). The resume step downloads into `checkpoints/`
+      # and looks for `checkpoints/swift/last.pt`, so the first shape breaks
+      # the resume chain the whole workflow depends on. Naming the directory
+      # keeps the root fixed whatever happens to be inside it.
       - name: Upload checkpoints
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: checkpoints
-          path: |
-            checkpoints/**/*.pt
-            checkpoints/**/training_log.jsonl
-            checkpoints/**/run_config.json
-            checkpoints/**/finetune_report.json
+          path: checkpoints/
           if-no-files-found: warn
-          retention-days: 90
+          # Each cycle uploads ~240 MB of weights and only the newest is ever
+          # resumed from. A long chain of runs at 90-day retention would fill
+          # the account's artifact storage for no benefit.
+          retention-days: 5
 
       - name: Upload evaluation reports
         if: always()
