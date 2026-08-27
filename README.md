@@ -407,6 +407,27 @@ progress as an artifact (`if: always()`, so a crash keeps its work), and
 the log prints `finished N steps`. See
 [`.github/workflows/train.yml`](.github/workflows/train.yml).
 
+Three things that had to be got right for that chain to actually hold, each
+found by running it rather than by reading it:
+
+* **Project Gutenberg refuses hosted runners.** Fetching the v0.4.0 corpus
+  died on the first book with `RemoteDisconnected` from a GitHub runner while
+  the identical code worked from a home connection — Gutenberg's robot policy
+  asks automated clients to use a mirror, and the main site enforces it. The
+  build now tries an official mirror first, with retries and a delay between
+  books.
+* **The artifact root moves if you glob it.** `upload-artifact` roots an
+  artifact at the least common ancestor of its paths, so
+  `checkpoints/**/*.pt` produced a different layout before and after
+  fine-tuning existed — and the resume step looks for one exact path. The
+  directory is named instead of globbed.
+* **Fine-tuning must gate on the training log, not the eval report.** The
+  report describes `best.pt`, whose step is the lowest-validation-loss
+  evaluation rather than the last one. Gating on it meant that once a run
+  flattened out, the chain would skip fine-tuning at the end of the budget
+  and every later resume would train zero steps and skip again — never
+  finishing.
+
 ### Python
 
 ```python
