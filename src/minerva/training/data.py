@@ -89,6 +89,7 @@ import html
 import random
 import re
 import sys
+import time
 import unicodedata
 import urllib.request
 import zipfile
@@ -151,12 +152,13 @@ SOURCES: tuple[CorpusSource, ...] = (
     ),
     CorpusSource(
         name="gutenberg_extended",
-        url="https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt",
+        url="https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt",
         patterns=(),  # selected by id, see _iter_gutenberg_extended_texts
         licence="Public domain (Project Gutenberg licence stripped with the header)",
         origin=(
-            "Project Gutenberg, fetched per-book by ebook id from "
-            "gutenberg.org - 119 curated titles, see _GUTENBERG_EXTENDED_IDS"
+            "Project Gutenberg, fetched per-book by ebook id from an "
+            "official mirror (gutenberg.pglaf.org, falling back to "
+            "gutenberg.org) - 119 curated titles, see _GUTENBERG_EXTENDED_IDS"
         ),
         description=(
             "The volume that makes fluency possible: 119 canonical English "
@@ -517,6 +519,44 @@ _BENYEHUDA_CATALOGUE_URL = (
 #: identify themselves rather than pretend to be a browser.
 _GUTENBERG_UA = "Minerva/0.4 corpus build (github.com/giamat13/Minerva)"
 
+#: Tried in order, per book. The **mirror comes first on purpose**: Project
+#: Gutenberg's robot policy asks automated clients to use a mirror rather than
+#: hammer the main site, and the main site enforces that - fetching these 119
+#: books from a GitHub Actions runner failed on the very first request with
+#: `http.client.RemoteDisconnected`, the datacenter IP being refused outright,
+#: while the identical code succeeded from a home connection. Politeness here
+#: is also the thing that makes the build work at all.
+_GUTENBERG_MIRRORS: tuple[str, ...] = (
+    "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt",
+    "https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt",
+)
+_GUTENBERG_ATTEMPTS_PER_MIRROR = 3
+#: Seconds between downloads, and the base for exponential retry backoff.
+_GUTENBERG_DELAY = 0.5
+
+
+def _fetch_gutenberg_book(gid: int) -> bytes:
+    """Download one book, trying each mirror with backoff.
+
+    Raises if every mirror fails: a corpus quietly missing a third of its
+    text would still train, and would still be wrong.
+    """
+    last: Exception | None = None
+    for template in _GUTENBERG_MIRRORS:
+        url = template.format(id=gid)
+        for attempt in range(_GUTENBERG_ATTEMPTS_PER_MIRROR):
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": _GUTENBERG_UA})
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    return bytes(response.read())
+            except Exception as exc:  # retried below, and re-raised if all fail
+                last = exc
+                time.sleep(_GUTENBERG_DELAY * (2**attempt))
+    raise RuntimeError(
+        f"could not download Project Gutenberg ebook {gid} from any mirror "
+        f"({', '.join(_GUTENBERG_MIRRORS)}); last error: {last!r}"
+    ) from last
+
 
 def _iter_gutenberg_extended_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
     """Fetch each curated Gutenberg book by id, caching it on disk.
@@ -524,8 +564,7 @@ def _iter_gutenberg_extended_texts(source: CorpusSource, cache_dir: Path) -> Ite
     One file per book rather than one big archive, because Gutenberg has no
     bulk endpoint for an arbitrary curated set - and because a per-book cache
     means an interrupted build resumes instead of starting the whole download
-    again. A book that fails to download raises: a corpus quietly missing
-    a third of its text would still train, and would still be wrong.
+    again.
     """
     books_dir = cache_dir / "gutenberg_extended"
     books_dir.mkdir(parents=True, exist_ok=True)
@@ -533,11 +572,10 @@ def _iter_gutenberg_extended_texts(source: CorpusSource, cache_dir: Path) -> Ite
     for gid in sorted(_GUTENBERG_EXTENDED_IDS):
         target = books_dir / f"pg{gid}.txt"
         if not (target.exists() and target.stat().st_size > 0):
-            url = source.url.format(id=gid)
-            request = urllib.request.Request(url, headers={"User-Agent": _GUTENBERG_UA})
-            with urllib.request.urlopen(request, timeout=120) as response:
-                payload = response.read()
-            target.write_bytes(payload)
+            target.write_bytes(_fetch_gutenberg_book(gid))
+            # Only when something was actually fetched - a warm cache should
+            # not sit through two minutes of sleeping for no reason.
+            time.sleep(_GUTENBERG_DELAY)
         yield target.read_text(encoding="utf-8", errors="replace")
 
 

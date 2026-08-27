@@ -116,6 +116,59 @@ class TestEuroparlCleaner:
         assert "I declare the session resumed." in cleaned
 
 
+class TestGutenbergFetchIsPoliteAndResilient:
+    """Fetching 119 books from gutenberg.org failed on CI, by design.
+
+    Project Gutenberg's robot policy asks automated clients to use a mirror,
+    and the main site enforces it: the first request from a GitHub Actions
+    runner came back as `http.client.RemoteDisconnected` while the identical
+    code worked from a home connection.
+    """
+
+    def test_a_mirror_is_tried_before_the_main_site(self) -> None:
+        from minerva.training.data import _GUTENBERG_MIRRORS
+
+        assert len(_GUTENBERG_MIRRORS) >= 2, "a single source has no fallback"
+        assert "www.gutenberg.org" not in _GUTENBERG_MIRRORS[0]
+        assert any("www.gutenberg.org" in m for m in _GUTENBERG_MIRRORS)
+
+    def test_every_mirror_is_tried_before_giving_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import minerva.training.data as data_module
+
+        attempted: list[str] = []
+
+        def always_fail(request, timeout=None):  # type: ignore[no-untyped-def]
+            attempted.append(request.full_url)
+            raise OSError("remote end closed connection")
+
+        monkeypatch.setattr(data_module.urllib.request, "urlopen", always_fail)
+        monkeypatch.setattr(data_module.time, "sleep", lambda _s: None)
+
+        with pytest.raises(RuntimeError, match="could not download"):
+            data_module._fetch_gutenberg_book(84)
+
+        hosts = {url.split("/")[2] for url in attempted}
+        assert len(hosts) == len(data_module._GUTENBERG_MIRRORS), "a mirror was never tried"
+        expected = len(data_module._GUTENBERG_MIRRORS) * data_module._GUTENBERG_ATTEMPTS_PER_MIRROR
+        assert len(attempted) == expected, "retries did not run the expected number of times"
+
+    def test_a_later_mirror_can_rescue_an_earlier_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import io
+
+        import minerva.training.data as data_module
+
+        def flaky(request, timeout=None):  # type: ignore[no-untyped-def]
+            if "pglaf" in request.full_url:
+                raise OSError("remote end closed connection")
+            return io.BytesIO(b"real book text")
+
+        monkeypatch.setattr(data_module.urllib.request, "urlopen", flaky)
+        monkeypatch.setattr(data_module.time, "sleep", lambda _s: None)
+        assert data_module._fetch_gutenberg_book(84) == b"real book text"
+
+
 class TestGutenbergExtendedCleaner:
     """The licence header/footer is identical across all 119 books.
 
