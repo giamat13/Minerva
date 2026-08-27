@@ -656,12 +656,25 @@ tokens (v0.3.0) toward ~164M, roughly 2.6 passes over a corpus 4.4x larger.
 This reverses the "scale the model up" plan on measured grounds, and is
 recorded here rather than quietly dropped.
 
-The vocabulary was left at 8,192 for this round. §2's vocab measurement said
-to repeat itself "if Hebrew's share of the corpus grows substantially" —
-Hebrew's *share* moved only 34% → 38%, though its absolute size grew 4x, so
-the condition is arguably met and the measurement is **outstanding, not
-settled**. It is named here as a known gap rather than presented as a
-decision that was made.
+### The vocabulary question, re-measured rather than assumed
+
+§2's vocab decision ends by saying the measurement "should be repeated" if
+the corpus changes substantially, and "is not assumed to be permanent, only
+correct for a 34%-Hebrew, 50.8 MB corpus". The corpus is now 185.5 MB and
+38% Hebrew, so it was repeated on the real rebuilt corpus:
+
+| | v0.2.0 corpus (50.8 MB) | v0.4.0 corpus (185.5 MB) |
+|---|---|---|
+| English chars/token | 3.338 | **3.355** |
+| Hebrew chars/token | 2.276 | **2.285** |
+| Hebrew/English ratio | 0.682 | **0.681** |
+
+**Essentially unchanged** — +0.5% English, +0.4% Hebrew, and the gap between
+the scripts is identical to three decimal places. Quadrupling the training
+text did not make an 8,192-token vocabulary meaningfully better or worse at
+either language, which is the outcome that leaves the original decision
+standing rather than merely un-revisited. Vocabulary stays at 8,192, now for
+a measured reason on this corpus rather than an inherited one.
 
 ---
 
