@@ -144,11 +144,25 @@ jobs:
       # budget - instruction-tuning a half-trained base model produces
       # numbers that describe nothing. The guard below checks for that
       # rather than assuming it.
+      #
+      # Progress is read from training_log.jsonl, NOT from the eval report.
+      # The report describes best.pt, whose step is whichever eval had the
+      # lowest validation loss - so if the final eval is not the best one,
+      # best.pt lags last.pt. Gating on that number would skip fine-tuning at
+      # the end of the budget, and every resume afterwards would train zero
+      # steps and re-read the same stale number: the chain would never
+      # fine-tune at all. The log is appended across resumes, so its highest
+      # step is the real progress.
       - name: Instruction-tune and evaluate
         if: inputs.finetune
         run: |
           set -euo pipefail
-          reached=$(python -c "import json;print(json.load(open('data/eval_report.json'))['steps_trained'])")
+          reached=$(python -c "
+          import json, pathlib
+          log = pathlib.Path('checkpoints/swift/training_log.jsonl')
+          steps = [json.loads(l).get('step', 0) for l in log.read_text().splitlines() if l.strip()]
+          print(max(steps) if steps else 0)
+          ")
           if [ "$reached" -lt "${{ inputs.steps }}" ]; then
             echo "::notice::Pretraining stopped at step $reached of ${{ inputs.steps }} (--max-hours)."
             echo "::notice::Skipping fine-tuning: re-run this workflow with resume=true to continue."
