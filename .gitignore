@@ -34,3 +34,8 @@ data/
 checkpoints/
 *.pt
 *.bin
+
+# Scratch downloads of CI artifacts, used to compare a hosted run against
+# the local one (see CLAUDE.md section 8). Not source.
+ci_artifacts/
+ci_reports/
