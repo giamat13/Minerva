@@ -42,3 +42,4 @@ ci_reports/
 
 eval_root/
 checkpoints/snapshot/
+eval_combo/

@@ -930,6 +930,48 @@ Two things were changed so this cannot recur quietly:
   — but it was never supported by a controlled comparison, and this document
   should not have said it was.
 
+### A real controlled comparison: instruct data alone, base held fixed
+
+Having withdrawn a claim that lacked one, here is the comparison actually
+run — the **same fully-trained v0.3.0 base**, fine-tuned twice, changing only
+the instruct set:
+
+| | 219 examples (v0.3.0) | 311 examples (v0.4.0) |
+|---|---|---|
+| related to question | **75.0%** | 64.3% |
+| routing accuracy | **97.7%** | 77.3% |
+| tool name accuracy | **93.1%** | 65.5% |
+| answered in-language | **94.4%** | 85.0% |
+| honest refusal | 66.7% | **100.0%** |
+
+**The larger set scored worse on the held-out cases**, and the shape of the
+loss says why: `tool_name_accuracy` fell hardest, so the model is reaching
+for the *wrong* tool, not failing to reach for one. Twenty `web_search`
+examples in 311 taught it to search where it should calculate — the same
+failure mode this file's own history records from a tool-heavy round, and it
+is recorded here rather than quietly reverted.
+
+But the held-out set is not the whole story, and the user-reported failure it
+was missing is worth showing directly:
+
+| prompt | 219 examples | 311 examples |
+|---|---|---|
+| "What is an apple?" | refuses, no tool | **calls `web_search`** |
+| "What is the capital of France?" | calls **`calculate`** | **calls `web_search`** |
+
+So the new data **fixed the routing behaviour that prompted it** while
+costing tool discrimination elsewhere. What it could not fix is the reply:
+the 311-example model answers the apple question `"חודש רביעי, קורה, קורה,
+קורה…"` — right tool, degenerate text, wrong language.
+
+That is the honest conclusion of this comparison: **instruct data decides
+what the model reaches for; the base model decides whether it can say
+anything coherent once it gets there.** No amount of instruct tuning fixes
+the second, which is why the v0.4.0 effort went into the corpus and the token
+budget. The tool-discrimination regression above must be re-measured against
+the finished base before deciding whether it survives a better model or
+needs the `web_search` examples rebalanced.
+
 Held-out evaluation, 44 hand-written cases (English and Hebrew combined —
 this round did not re-run the separate-by-language scoring §8's v0.2.0
 section used; that is a real gap in this round's measurement, not a claim
