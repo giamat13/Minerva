@@ -79,6 +79,11 @@
     position: relative; z-index: 1; transition: transform 0.15s, background 0.15s, color 0.15s;
   }
   .note:hover { border-color: var(--accent); color: var(--text); }
+  /* The loaded model has no reasoning phase: the scale is shown, because it
+     is real architecture, but plainly marked as doing nothing here. */
+  .scale.inactive { opacity: 0.45; }
+  .scale.inactive .note { cursor: default; }
+  .scale.inactive .note:hover { border-color: var(--border); color: var(--muted); }
   .note[aria-pressed="true"] {
     background: var(--brass); border-color: var(--brass); color: var(--brass-fg);
     transform: scale(1.15);
@@ -412,9 +417,18 @@ async function loadInfo() {
     thinkingScale.appendChild(btn);
   });
   selectNote(info.default_thinking);
+  // Offering a control that provably does nothing is worse than not offering
+  // it: the scale stays visible (it is a real part of the architecture) but
+  // is marked inactive, so the limit is stated once here instead of being
+  // repeated under every reply.
   if (!info.supports_thinking) {
+    thinkingScale.classList.add("inactive");
     thinkingScale.title =
-      info.display_name + " has no reasoning phase; every level resolves to do.";
+      info.display_name + " has no reasoning phase, so every level resolves to do.";
+    for (const btn of thinkingScale.children) {
+      btn.disabled = true;
+      btn.title = thinkingScale.title;
+    }
   }
 }
 
@@ -459,8 +473,17 @@ async function send() {
   setBusy(false);
 
   const eff = data.effective_thinking;
+  // A model with no reasoning phase clamps every level to `do`, so saying so
+  // on every single turn is noise, not honesty - the header already states
+  // it once, and the scale is visibly disabled. Only report the clamp when it
+  // is genuinely informative: a model that CAN think, asked for more than its
+  // own ceiling allows.
   let metaText = "thinking: " + eff.name + " (" + eff.hebrew + ")";
-  if (data.requested_thinking && data.requested_thinking !== eff.name) {
+  if (
+    info.supports_thinking &&
+    data.requested_thinking &&
+    data.requested_thinking !== eff.name
+  ) {
     metaText = "requested " + data.requested_thinking + " → " + metaText +
       " - " + info.display_name + " ignores levels above its ceiling";
   }
