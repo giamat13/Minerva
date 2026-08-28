@@ -79,11 +79,6 @@
     position: relative; z-index: 1; transition: transform 0.15s, background 0.15s, color 0.15s;
   }
   .note:hover { border-color: var(--accent); color: var(--text); }
-  /* The loaded model has no reasoning phase: the scale is shown, because it
-     is real architecture, but plainly marked as doing nothing here. */
-  .scale.inactive { opacity: 0.45; }
-  .scale.inactive .note { cursor: default; }
-  .scale.inactive .note:hover { border-color: var(--border); color: var(--muted); }
   .note[aria-pressed="true"] {
     background: var(--brass); border-color: var(--brass); color: var(--brass-fg);
     transform: scale(1.15);
@@ -418,16 +413,16 @@ async function loadInfo() {
     thinkingScale.appendChild(btn);
   });
   selectNote(info.default_thinking);
-  // Offering a control that provably does nothing is worse than not offering
-  // it: the scale stays visible (it is a real part of the architecture) but
-  // is marked inactive, so the limit is stated once here instead of being
-  // repeated under every reply.
+  // The scale stays fully selectable even for a model with no reasoning
+  // phase. Disabling it read as broken ("stuck on do") rather than as
+  // informative, and the honest fact - that this model resolves every level
+  // to `do` - belongs in the header, which states it once, not in a dead
+  // control the user cannot move. The request is still sent and the server
+  // still reports the level it actually resolved to.
   if (!info.supports_thinking) {
-    thinkingScale.classList.add("inactive");
     thinkingScale.title =
       info.display_name + " has no reasoning phase, so every level resolves to do.";
     for (const btn of thinkingScale.children) {
-      btn.disabled = true;
       btn.title = thinkingScale.title;
     }
   }

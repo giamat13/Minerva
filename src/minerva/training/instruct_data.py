@@ -1430,6 +1430,139 @@ _FLUENT_NO_TOOL: tuple[InstructExample, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# 8d. "What is X?" - things in the world, which now go to web_search.
+#
+#    A gap this file created for itself. v0.3.0 removed encyclopedic content
+#    from the pretraining corpus on the grounds that a 9.9M model cannot hold
+#    facts, only confabulate them - and then section 8b added word-definition
+#    examples answered straight from memory. Those two positions do not sit
+#    together, and the model showed it: asked "What is an apple?" it produced
+#    "I do not know or something. I have no memory.", asked the same in Hebrew
+#    it produced "השם?", and asked for the capital of France it called the
+#    *calculator* and answered "The total is 23."
+#
+#    The line drawn here, and the reason for it: **a word's meaning is
+#    language, a thing's identity is a fact.** "What does 'ambiguous' mean?"
+#    is answerable from having read prose, which is exactly what this model's
+#    corpus is - those stay direct answers in section 8b. "What is an apple?"
+#    or "who was Newton?" is a claim about the world, which the corpus
+#    deliberately no longer teaches, so it routes to web_search like every
+#    other world-fact in section 6b.
+#
+#    Pinned, like every other web_search example here: a live search is not
+#    reproducible.
+# ---------------------------------------------------------------------------
+
+_WHAT_IS_IT: tuple[InstructExample, ...] = (
+    InstructExample(
+        user="What is an apple?",
+        call=("web_search", {"query": "what is an apple fruit"}),
+        result=(
+            "Apple - Britannica\n"
+            "https://www.britannica.com/plant/apple\n"
+            "Apple, fruit of the domesticated tree Malus domestica, one of the "
+            "most widely cultivated tree fruits, grown in temperate regions."
+        ),
+        pinned=True,
+        answer=(
+            "An apple is the fruit of the tree Malus domestica, one of the most "
+            "widely grown tree fruits in temperate parts of the world."
+        ),
+    ),
+    InstructExample(
+        user="What is a volcano?",
+        call=("web_search", {"query": "what is a volcano"}),
+        result=(
+            "Volcano - National Geographic\n"
+            "https://education.nationalgeographic.org/resource/volcano/\n"
+            "A volcano is an opening in a planet's crust through which molten "
+            "rock, ash and gases escape from below the surface."
+        ),
+        pinned=True,
+        answer=(
+            "A volcano is an opening in a planet's crust where molten rock, ash "
+            "and gas escape from below the surface."
+        ),
+    ),
+    InstructExample(
+        user="Who was Isaac Newton?",
+        think="A person in the world is a fact I was not trained on, so I should look him up.",
+        call=("web_search", {"query": "who was Isaac Newton"}),
+        result=(
+            "Isaac Newton - Britannica\n"
+            "https://www.britannica.com/biography/Isaac-Newton\n"
+            "English physicist and mathematician (1642-1727) who formulated the "
+            "laws of motion and universal gravitation."
+        ),
+        pinned=True,
+        answer=(
+            "Isaac Newton was an English physicist and mathematician who worked "
+            "out the laws of motion and universal gravitation."
+        ),
+    ),
+    InstructExample(
+        user="What is the capital of Japan?",
+        call=("web_search", {"query": "capital of Japan"}),
+        result=(
+            "Japan - The World Factbook\n"
+            "https://www.cia.gov/the-world-factbook/countries/japan/\n"
+            "Capital: Tokyo."
+        ),
+        pinned=True,
+        answer="The capital of Japan is Tokyo.",
+    ),
+    InstructExample(
+        user="Tell me about the Amazon river.",
+        call=("web_search", {"query": "Amazon river facts"}),
+        result=(
+            "Amazon River - Britannica\n"
+            "https://www.britannica.com/place/Amazon-River\n"
+            "The greatest river of South America and the largest drainage system "
+            "in the world in terms of the volume of its flow."
+        ),
+        pinned=True,
+        answer=(
+            "The Amazon is the greatest river in South America and carries a "
+            "larger volume of water than any other river in the world."
+        ),
+    ),
+    InstructExample(
+        user="מה זה תפוח?",
+        call=("web_search", {"query": "מה זה תפוח פרי"}),
+        result=(
+            "תפוח - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/תפוח\n"
+            "התפוח הוא פרי של עץ התפוח, מהנפוצים בעצי הפרי באזורים ממוזגים."
+        ),
+        pinned=True,
+        answer="תפוח הוא פרי של עץ התפוח, אחד מעצי הפרי הנפוצים באזורים ממוזגים.",
+    ),
+    InstructExample(
+        user="מה זה הר געש?",
+        call=("web_search", {"query": "מה זה הר געש"}),
+        result=(
+            "הר געש - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/הר_געש\n"
+            "הר געש הוא פתח בקרום כדור הארץ שדרכו נפלטים לבה, אפר וגזים."
+        ),
+        pinned=True,
+        answer="הר געש הוא פתח בקרום כדור הארץ שדרכו נפלטים לבה, אפר וגזים.",
+    ),
+    InstructExample(
+        user="מה הבירה של יפן?",
+        call=("web_search", {"query": "הבירה של יפן"}),
+        result=(
+            "יפן - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/יפן\n"
+            "עיר הבירה של יפן היא טוקיו."
+        ),
+        pinned=True,
+        answer="הבירה של יפן היא טוקיו.",
+    ),
+)
+
+
 _FLUENT_TOOL_USE: tuple[InstructExample, ...] = (
     # Every calculate/days_between answer below states the result the real
     # tool returns - checked by running the tool, not by eye. The clock and
@@ -1745,6 +1878,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_TALK_NATURALLY,
     *_FLUENT_NO_TOOL,
     *_FLUENT_TOOL_USE,
+    *_WHAT_IS_IT,
     *_HEBREW,
 )
 
