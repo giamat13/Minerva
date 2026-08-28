@@ -39,3 +39,6 @@ checkpoints/
 # the local one (see CLAUDE.md section 8). Not source.
 ci_artifacts/
 ci_reports/
+
+eval_root/
+checkpoints/snapshot/

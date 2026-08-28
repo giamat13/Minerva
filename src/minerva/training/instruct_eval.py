@@ -404,6 +404,25 @@ def evaluate_instruct(
             flag = "ok " if routing_ok else "ROUTE"
             print(f"  [{flag}] {case.prompt!r} -> {called or 'direct'} | {answer[:60]!r}")
 
+    # If every single case raised, the model was never actually exercised and
+    # every percentage below is 0.0 for a reason that has nothing to do with
+    # the model's quality. Reporting that as a row of zeros invites exactly
+    # the mistake it caused here: a misconfigured `checkpoint_dir` (it is the
+    # PARENT of the per-model directories, so `checkpoints/foo` looks for
+    # `checkpoints/foo/<model>/best.pt`) was read as "the model scores 0%",
+    # and that number reached the documentation before anyone noticed. A
+    # measurement that measured nothing has to say so.
+    failures = [row for row in rows if row["error"]]
+    if rows and len(failures) == len(rows):
+        first = failures[0]["error"]
+        raise RuntimeError(
+            f"every one of the {len(rows)} evaluation cases failed, so nothing about "
+            f"the model was measured. First error: {first}. "
+            f"If this is a 'no checkpoint' error, note that checkpoint_dir is the "
+            f"parent directory holding one sub-directory per model - pass "
+            f"'checkpoints', not 'checkpoints/{model_name}'."
+        )
+
     def pct(numerator: str, denominator: str) -> float:
         total = totals[denominator]
         return round(100 * totals[numerator] / total, 1) if total else 0.0

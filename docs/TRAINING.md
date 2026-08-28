@@ -498,9 +498,10 @@ or 1987 Reuters newswire is.
 | Instruct routing accuracy | 91–97% | 70.5%\* | **97.7%** |
 | Instruct argument accuracy | — | 3.4%\* | 10.3% |
 
-\* Measured on the full v0.3.0 271-example instruct set (see §8); the
-219-example control run scored even lower (34.1% routing) on the same held-out
-cases, with empty answers on most arithmetic prompts.
+\* Measured on the full v0.3.0 271-example instruct set (see §8). An earlier
+version of this table also cited a 219-example "control" run at 34.1%
+routing; **that number was wrong and has been withdrawn** — see the
+correction in §8.
 
 **Corpus, final:** Gutenberg 11.73 MB, Brown 5.98 MB, webtext 1.72 MB,
 inaugural 0.82 MB, State of the Union 2.07 MB, Europarl (English) 3.06 MB,
@@ -900,14 +901,34 @@ English and three Hebrew "I don't know" examples became `web_search` calls
 instead, for exactly the questions a search can actually resolve (see §5c
 and `instruct_data.py`'s own docstring for the line between the two).
 
-**Isolating the base-model regression from the data change mattered enough to
-measure directly.** Finetuning the *old*, untouched 219-example set against
-the *new* base model (before the Brown-corpus fix) reached only 34.1% routing
-accuracy on the held-out set, with empty answers on nearly every arithmetic
-prompt — worse than the 271-example set's 70.5% on the same broken base. That
-ruled out the new instruct examples as the cause and pointed at the base
-model, which is what led to §5c's Brown-corpus fix rather than a data
-rollback.
+**A withdrawn measurement, and what it cost.** This section previously
+claimed that fine-tuning the *old*, untouched 219-example set against the new
+base model "reached only 34.1% routing accuracy, with empty answers on nearly
+every arithmetic prompt", and treated that as proof the regression lived in
+the base model rather than the instruct data.
+
+**That number is withdrawn. It measured nothing.** It came from a run whose
+`checkpoint_dir` pointed at `checkpoints/swift-instruct-control`, but
+`checkpoint_dir` is the *parent* directory holding one sub-directory per
+model — so the engine looked for
+`checkpoints/swift-instruct-control/swift-instruct/best.pt`, found no
+checkpoint, and raised on every single case. `evaluate_instruct` caught each
+exception per case and dutifully reported a row of zeros and a 34.1% routing
+figure that is just the rate at which "called no tool" happens to match the
+expected answer when the model never ran at all. "Empty answers on nearly
+every arithmetic prompt" was the literal truth and the clue, and it was read
+as a model result instead of a configuration error.
+
+Two things were changed so this cannot recur quietly:
+
+* `evaluate_instruct` now **raises** when every case fails, naming the first
+  error and the `checkpoint_dir` trap explicitly, instead of returning a
+  plausible-looking row of zeros.
+* The claim it supported is retracted. The Brown-corpus fix in §5c still
+  stands on its own evidence — the base model's own held-out loss and
+  perplexity, and the instruct numbers measured on correctly-configured runs
+  — but it was never supported by a controlled comparison, and this document
+  should not have said it was.
 
 Held-out evaluation, 44 hand-written cases (English and Hebrew combined —
 this round did not re-run the separate-by-language scoring §8's v0.2.0
