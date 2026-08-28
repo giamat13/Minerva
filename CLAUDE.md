@@ -280,6 +280,40 @@ ruff check . && mypy          # both must be clean before committing
 
 ---
 
+## 8. Running training: start both, keep whichever is faster
+
+A real training run goes to **both** places at once — this machine and the
+GitHub Actions workflow (`.github/workflows/train.yml`) — and whichever gets
+there first is the one that counts. Neither is reliably faster, so the
+answer is measured per run rather than assumed:
+
+| | local | hosted runner |
+|---|---|---|
+| cores | 4 | 2 |
+| measured throughput (9.9M, seq 512) | ~3,100 tok/s | ~1,400–1,600 tok/s |
+| job limit | none | 6 h hard, so the run must resume across jobs |
+| costs the user's machine | yes | no |
+
+Local is usually about twice as fast per token, and the runner is usually
+better at grinding through a long budget unattended. Start both, watch the
+step counters, and take the checkpoint that is further along.
+
+Rules that keep the two from corrupting each other:
+
+- ✅ **Never let both write the same directory.** Local training owns
+  `checkpoints/swift`. A CI artifact is downloaded somewhere else and only
+  promoted over the local one after comparing real progress.
+- ✅ **Compare by step count from `training_log.jsonl`**, not by file
+  timestamp and not by `best.pt` — see the note in the workflow about why
+  `best.pt`'s step can lag actual progress.
+- ✅ **Stop the loser once one side finishes.** A run that can no longer win
+  is just burning a machine or a free-tier minute; cancel it and say so.
+- ✅ The two runs are independent samples of the same config, not halves of
+  one job. Taking the further-along one is legitimate; splicing their
+  weights together is not.
+
+---
+
 ## הנחיות בעברית (תקציר)
 
 **אימונים — איכות בלבד.**
@@ -326,6 +360,17 @@ Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טק�
 `supports_thinking`) ובתיעוד. אסור לפרסם יכולת שהמשקולות לא באמת מספקות ולתת
 לקוד לכסות על זה. כשמתגלה באג — כותבים אותו, את ההשפעה המדודה ואת ההחלטה
 שהתקבלה, ולא מתקנים בשקט.
+
+**מריצים אימון בשני המקומות, ולוקחים את המהיר.**
+כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions, ומי
+שמגיע ראשון הוא זה שנחשב. אין צד שהוא תמיד מהיר יותר: מקומית יש 4 ליבות
+(בערך 3,100 טוקנים לשנייה) מול 2 ליבות ב-runner (בערך 1,400–1,600), אבל
+ל-runner אין מגבלת זמן על המכונה של המשתמש ויש לו מגבלת 6 שעות לכל job, ולכן
+הוא ממשיך מ-checkpoint בין ריצות. **אסור** ששתי הריצות יכתבו לאותה תיקייה —
+האימון המקומי הוא הבעלים של `checkpoints/swift`, וארטיפקט מ-CI יורד לתיקייה
+אחרת ומקודם רק אחרי השוואת התקדמות אמיתית לפי מספר הצעד מ-`training_log.jsonl`
+(לא לפי תאריך הקובץ ולא לפי `best.pt`). כשצד אחד מסיים — עוצרים את השני
+ומדווחים על כך.
 
 **קומיטים באמצע העבודה.**
 מותר וכדאי לעשות קומיט (בלי push) כדי לשמור התקדמות אמיתית ועובדת באמצע
