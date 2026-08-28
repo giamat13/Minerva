@@ -473,21 +473,24 @@ async function send() {
   setBusy(false);
 
   const eff = data.effective_thinking;
-  // A model with no reasoning phase clamps every level to `do`, so saying so
-  // on every single turn is noise, not honesty - the header already states
-  // it once, and the scale is visibly disabled. Only report the clamp when it
-  // is genuinely informative: a model that CAN think, asked for more than its
-  // own ceiling allows.
-  let metaText = "thinking: " + eff.name + " (" + eff.hebrew + ")";
-  if (
-    info.supports_thinking &&
-    data.requested_thinking &&
-    data.requested_thinking !== eff.name
-  ) {
-    metaText = "requested " + data.requested_thinking + " → " + metaText +
-      " - " + info.display_name + " ignores levels above its ceiling";
+  // What goes under a reply is only what varies between replies. For a model
+  // with no reasoning phase every level resolves to `do`, so BOTH the clamp
+  // note and the level itself are constants - printing either one per turn is
+  // noise, not honesty. The header states the limit once and the scale is
+  // visibly disabled; here, only the duration changes, so only the duration
+  // is shown. The thinking line comes back for a model that can actually
+  // think, and the clamp note with it when a request exceeds its ceiling.
+  const parts = [];
+  if (info.supports_thinking) {
+    let level = "thinking: " + eff.name + " (" + eff.hebrew + ")";
+    if (data.requested_thinking && data.requested_thinking !== eff.name) {
+      level = "requested " + data.requested_thinking + " → " + level +
+        " - " + info.display_name + " ignores levels above its ceiling";
+    }
+    parts.push(level);
   }
-  metaText += "  ·  " + data.duration_seconds + "s";
+  parts.push(data.duration_seconds + "s");
+  const metaText = parts.join("  ·  ");
 
   addEvent({
     type: "bot",
