@@ -245,6 +245,50 @@ class TestLanguageAndCoherenceMetrics:
         assert not _is_degenerate("Twelve.")
 
 
+class TestRelevanceExpectations:
+    """The relevance metric is only as honest as its hand-written markers."""
+
+    def test_no_marker_is_short_enough_to_match_anything(self) -> None:
+        """A one-letter marker scores every English sentence as relevant.
+
+        This is not hypothetical: "Spell the word cat backwards." was first
+        written with markers ("tac", "cat", "c", "a", "t"), and "c"/"a"/"t"
+        would have passed the case no matter what came back.
+        """
+        for case in EVAL_CASES:
+            for marker in case.relevant_if:
+                assert len(marker.strip()) >= 2, (
+                    f"{case.prompt!r} has marker {marker!r}, too short to mean anything"
+                )
+
+    def test_every_conversational_case_says_what_relevant_means(self) -> None:
+        """Otherwise it silently falls through to the tool-call default.
+
+        A direct-answer case has no tool and no expected value, so without
+        explicit markers the scorer would fall back to "did it call a tool",
+        which is False for every such case - marking all of them irrelevant
+        and quietly understating the metric.
+        """
+        for case in EVAL_CASES:
+            conversational = (
+                case.expects_tool is None
+                and case.expected_value is None
+                and not case.expects_refusal
+            )
+            if conversational:
+                assert case.relevant_if, f"{case.prompt!r} needs relevant_if markers"
+
+    def test_relevance_is_a_weaker_bar_than_correctness(self) -> None:
+        """"Thursday" for "what comes after Saturday" is relevant and wrong."""
+        case = next(c for c in EVAL_CASES if c.prompt == "What comes after Saturday?")
+        assert any(m in "thursday." for m in case.relevant_if), (
+            "a wrong-but-on-topic weekday should still count as engaging the question"
+        )
+        assert not any(m in "nice to meet you." for m in case.relevant_if), (
+            "an off-topic pleasantry must not count as engaging the question"
+        )
+
+
 class TestSupervisedEncoding:
     @pytest.fixture(scope="class")
     @classmethod

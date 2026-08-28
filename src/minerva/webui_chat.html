@@ -313,6 +313,7 @@ function renderStats(data) {
       '<div class="stats-headline-label">answers that were actually correct '+
       'and relevant to what was asked</div></div>' +
       '<div class="stats-section">Instruct (' + s.cases + ' held-out cases)</div>' +
+      statRow("related to question", s.relevance_pct) +
       statRow("answered in-language", s.language_match_pct) +
       statRow("coherent (no repeats)", s.coherence_pct) +
       statRow("routing accuracy", s.routing_accuracy_pct) +

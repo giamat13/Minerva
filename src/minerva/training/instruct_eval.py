@@ -31,6 +31,13 @@ What is measured
               a Hebrew question in English - v0.3.0's own eval log contains
               exactly that, scored as a pass. For a bilingual model that is
               the most visible failure there is, so it gets its own number.
+``relevance`` Did the reply engage the question at all, right or wrong?
+              Deliberately a weaker bar than ``answer``: "Thursday" for
+              "what comes after Saturday" is relevant and wrong, while
+              "Nice to meet you" for "name the first month" is not about
+              months at all. The second is what a user means by "it says
+              things unrelated to what I asked", and it is the one this
+              number tracks.
 ``coherence`` Did the reply avoid collapsing into repetition? Also v0.4.0.
               A small model that has lost the thread tends to echo a phrase
               rather than stop, which reads as broken to a user even when
@@ -65,6 +72,21 @@ class EvalCase:
     """The value the final answer must contain, for questions with one."""
     expects_refusal: bool = False
     """True when the honest response is admitting it does not know."""
+    relevant_if: tuple[str, ...] = ()
+    """Substrings marking a reply that **engaged the question**, right or wrong.
+
+    Relevance is deliberately a weaker bar than correctness, because they are
+    different failures and a user feels them differently. "What comes after
+    Saturday?" answered "Thursday." is relevant and wrong - it is at least
+    about weekdays. "Name the first month of the year." answered "Nice to
+    meet you." is not about months at all, and that is the failure a user
+    describes as "it says things unrelated to what I asked".
+
+    Hand-written per case, like every other expectation in this file. Left
+    empty where a sensible default exists: a case with an `expected_value`
+    is relevant if the reply contains any number, and a refusal case is
+    relevant if the reply refuses.
+    """
 
 
 #: Hand-written, held out. None of these prompts is in `instruct_data.py`.
@@ -90,16 +112,24 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("How many days between 2026-02-01 and 2026-02-28?", "days_between", "27"),
     EvalCase("Count the days from 2026-05-01 to 2026-06-01.", "days_between", "31"),
     # -- no tool needed ------------------------------------------------------
-    EvalCase("Good evening.", None),
-    EvalCase("Hello there, how are you?", None),
-    EvalCase("What should I call you?", None),
-    EvalCase("Many thanks.", None),
-    EvalCase("Say the word apple.", None),
-    EvalCase("How many days are in a fortnight?", None),
-    EvalCase("Name the first month of the year.", None),
-    EvalCase("Make this upper case: quiet please", None),
-    EvalCase("What comes after Saturday?", None),
-    EvalCase("Spell the word cat backwards.", None),
+    EvalCase("Good evening.", None, relevant_if=("evening", "morning", "hello", "hi", "good")),
+    EvalCase("Hello there, how are you?", None,
+             relevant_if=("hello", "hi", "well", "fine", "good", "help", "how")),
+    EvalCase("What should I call you?", None, relevant_if=("swift", "name", "call")),
+    EvalCase("Many thanks.", None,
+             relevant_if=("welcome", "glad", "pleasure", "happy", "any time", "sure")),
+    EvalCase("Say the word apple.", None, relevant_if=("apple",)),
+    EvalCase("How many days are in a fortnight?", None,
+             relevant_if=("day", "fourteen", "14", "two week")),
+    EvalCase("Name the first month of the year.", None,
+             relevant_if=("january", "month")),
+    EvalCase("Make this upper case: quiet please", None, relevant_if=("quiet", "please")),
+    EvalCase("What comes after Saturday?", None,
+             relevant_if=("sunday", "monday", "tuesday", "wednesday", "thursday",
+                          "friday", "saturday", "day")),
+    # NOT ("c", "a", "t") - single letters match almost any English sentence
+    # and would score this case as relevant no matter what came back.
+    EvalCase("Spell the word cat backwards.", None, relevant_if=("tac", "cat")),
     # -- should decline rather than invent: no tool fixes these ---------------
     EvalCase("Write me a complete database engine.", None, expects_refusal=True),
     EvalCase("Translate 'good night' into Korean.", None, expects_refusal=True),
@@ -120,8 +150,8 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("12 בריבוע.", "calculate", "144"),
     EvalCase("מה השעה בלונדון?", "current_time"),
     EvalCase("כמה ימים יש בין 2026-02-01 ל-2026-02-28?", "days_between", "27"),
-    EvalCase("ערב טוב.", None),
-    EvalCase("איך קוראים לך?", None),
+    EvalCase("ערב טוב.", None, relevant_if=("ערב", "בוקר", "שלום", "טוב")),
+    EvalCase("איך קוראים לך?", None, relevant_if=("swift", "שם", "קוראים", "אני")),
     EvalCase("מי המנכ״ל של החברה?", None, expects_refusal=True),
     EvalCase("מה מחיר המניה של אפל היום?", "web_search"),
 )
@@ -269,6 +299,8 @@ def evaluate_instruct(
         "language_ok": 0,
         "answered": 0,
         "coherent": 0,
+        "relevance_scorable": 0,
+        "relevant": 0,
     }
     rows: list[dict[str, Any]] = []
 
@@ -327,6 +359,27 @@ def evaluate_instruct(
             language_ok = want_script == got_script
             totals["language_ok"] += language_ok
 
+        # Relevance: did the reply engage the question at all? Deliberately a
+        # weaker bar than correctness - "Thursday" for "what comes after
+        # Saturday" is relevant and wrong, while "Nice to meet you" for "name
+        # the first month" is the failure a user calls "unrelated".
+        low = answer.lower()
+        if case.relevant_if:
+            relevant = any(marker.lower() in low for marker in case.relevant_if)
+        elif case.expects_refusal:
+            relevant = any(m in low for m in _REFUSAL_MARKERS)
+        elif case.expected_value is not None:
+            # It was asked for a quantity; a reply with no number in it did
+            # not engage the question, whatever else it did.
+            relevant = bool(_NUMBER.search(answer))
+        else:
+            # Tool-routing cases with no expected value (clock, web_search):
+            # engaging means actually reaching for a tool.
+            relevant = bool(calls)
+        if answer.strip() or calls:
+            totals["relevance_scorable"] += 1
+            totals["relevant"] += relevant
+
         # Coherence: produced something, and did not collapse into repetition.
         degenerate = _is_degenerate(answer)
         if answer.strip():
@@ -340,6 +393,7 @@ def evaluate_instruct(
                 "called": called,
                 "routing_ok": routing_ok,
                 "arguments_ok": arguments_ok,
+                "relevant": relevant,
                 "language_ok": language_ok,
                 "degenerate": degenerate,
                 "answer": answer,
@@ -365,6 +419,7 @@ def evaluate_instruct(
         "argument_accuracy_pct": pct("arguments_ok", "tool_expected"),
         "final_answer_accuracy_pct": pct("answer_ok", "value_expected"),
         "honest_refusal_pct": pct("refusal_ok", "refusal_expected"),
+        "relevance_pct": pct("relevant", "relevance_scorable"),
         "language_match_pct": pct("language_ok", "language_scorable"),
         "coherence_pct": pct("coherent", "answered"),
         "counts": totals,
@@ -398,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  argument accuracy     {summary['argument_accuracy_pct']:5.1f}%")
     print(f"  final answer correct  {summary['final_answer_accuracy_pct']:5.1f}%")
     print(f"  honest refusal        {summary['honest_refusal_pct']:5.1f}%")
+    print(f"  related to question   {summary['relevance_pct']:5.1f}%")
     print(f"  answered in-language  {summary['language_match_pct']:5.1f}%")
     print(f"  coherent (no repeats) {summary['coherence_pct']:5.1f}%")
 
