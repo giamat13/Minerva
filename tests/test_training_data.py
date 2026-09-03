@@ -404,3 +404,54 @@ class TestTokenDataset:
         np.arange(4, dtype=np.uint16).tofile(tiny)
         with pytest.raises(ValueError, match="too few"):
             TokenDataset(tiny, 512)
+
+
+@pytest.mark.torch
+class TestEncodeCorpus:
+    """The streaming tokenizer, which must not truncate a large corpus.
+
+    The v0.5.0 build shipped a version that wrote 1.1M of 518M tokens and
+    still exited 0: the per-block progress line called ``handle.tell()``, which
+    raises "telling position disabled by next() call" once ``readlines()`` has
+    been used, and the exception ended the loop after the first block. Both
+    tests below force more than one block, which is the only way to see it.
+    """
+
+    @staticmethod
+    def _tokenizer():
+        from minerva.training.tokenizer import BPETokenizer, train_bpe
+
+        text = ("the quick brown fox jumps over the lazy dog. " * 200) + "שלום עולם. " * 50
+        vocab, merges = train_bpe(text, 300, verbose=False)
+        return BPETokenizer(vocab, merges)
+
+    def _corpus(self, tmp_path: Path, blocks: float) -> tuple[Path, str]:
+        from minerva.training.dataset import _ENCODE_BLOCK_CHARS
+
+        line = "the quick brown fox jumps over the lazy dog and keeps running.\n"
+        text = line * int(_ENCODE_BLOCK_CHARS * blocks / len(line))
+        path = tmp_path / "corpus.txt"
+        path.write_text(text, encoding="utf-8")
+        return path, text
+
+    def test_a_multi_block_corpus_is_encoded_in_full(self, tmp_path: Path) -> None:
+        from minerva.training.dataset import encode_corpus
+
+        source, text = self._corpus(tmp_path, 2.5)
+        tokenizer = self._tokenizer()
+        out = tmp_path / "corpus.bin"
+        written = encode_corpus(source, tokenizer, out, verbose=False)
+
+        expected = tokenizer.encode(text)
+        assert written == len(expected), "streaming dropped tokens"
+        assert np.array_equal(np.fromfile(out, dtype=np.uint16), np.asarray(expected, np.uint16))
+
+    def test_progress_reporting_does_not_truncate_the_output(self, tmp_path: Path) -> None:
+        """verbose=True is the path that carried the bug; it must match quiet."""
+        from minerva.training.dataset import encode_corpus
+
+        source, _ = self._corpus(tmp_path, 2.5)
+        tokenizer = self._tokenizer()
+        quiet = encode_corpus(source, tokenizer, tmp_path / "q.bin", verbose=False)
+        loud = encode_corpus(source, tokenizer, tmp_path / "l.bin", verbose=True)
+        assert loud == quiet

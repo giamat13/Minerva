@@ -42,6 +42,11 @@ on:
         type: boolean
         required: false
         default: true
+      chain:
+        description: "Re-dispatch this workflow automatically until the step budget is met"
+        type: boolean
+        required: false
+        default: true
 
 # Two runs writing checkpoints for the same model would race and produce a
 # corpus/checkpoint mismatch, so only one may be in flight at a time. Never
@@ -78,12 +83,35 @@ jobs:
       # tokenizer bit-identical to the previous cycle's. The key is the code
       # that determines the output, so editing SOURCES, a cleaner or the
       # tokenizer correctly invalidates it and forces an honest rebuild.
-      - name: Cache the built corpus, tokenizer and token bins
+      # Cached: the downloaded sources and the packed token bins, which is
+      # what costs real time to reproduce (the v0.5.0 bulk fetch is thousands
+      # of polite HTTP requests, and the BPE training is ~20 minutes). NOT
+      # cached: data/train.txt, ~1.9 GB of intermediate text that the bins
+      # already encode - GitHub caps a repo's cache at 10 GB, and keeping the
+      # text as well would blow through it for no benefit.
+      #
+      # The key is the code that determines the output, so editing SOURCES, a
+      # cleaner or the tokenizer correctly invalidates it and forces an honest
+      # rebuild.
+      - name: Cache the corpus sources, tokenizer and token bins
         id: corpus
         uses: actions/cache@v4
         with:
-          path: data
-          key: corpus-v2-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py') }}
+          path: |
+            data/cache
+            data/tokenizer.json
+            data/train.bin
+            data/val.bin
+            data/manifest.json
+          key: corpus-v5-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
+
+      # The books are fetched by their own script rather than by the corpus
+      # build: at this volume it is a long, resumable job, and a build that
+      # silently started thousands of downloads would be a bad surprise. The
+      # committed id list makes it fetch exactly the shipped set.
+      - name: Fetch the bulk book set
+        if: steps.corpus.outputs.cache-hit != 'true'
+        run: python scripts/fetch_gutenberg_books.py
 
       - name: Build the corpus, tokenizer and token bins
         if: steps.corpus.outputs.cache-hit != 'true'
@@ -187,6 +215,7 @@ jobs:
       # the resume chain the whole workflow depends on. Naming the directory
       # keeps the root fixed whatever happens to be inside it.
       - name: Upload checkpoints
+        id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -209,3 +238,40 @@ jobs:
             data/manifest.json
           if-no-files-found: warn
           retention-days: 90
+
+      # A full pass over the v0.5.0 corpus at 23.2M parameters is far more
+      # than one 6-hour job holds, so the chain re-dispatches itself rather
+      # than asking a human to press the button thirty times. It stops on its
+      # own the moment training_log.jsonl shows the step budget reached -
+      # the same source the fine-tune gate reads, and for the same reason
+      # (best.pt's step lags real progress).
+      #
+      # Guarded by `success()`: a failed run must NOT queue another, or a
+      # broken build becomes an infinite loop burning the account's minutes.
+      - name: Queue the next run if the budget is not met
+        if: success() && inputs.chain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reached=$(python -c "
+          import json, pathlib
+          log = pathlib.Path('checkpoints/swift/training_log.jsonl')
+          if not log.exists():
+              print(0)
+          else:
+              steps = [json.loads(l).get('step', 0)
+                       for l in log.read_text().splitlines() if l.strip()]
+              print(max(steps) if steps else 0)
+          ")
+          if [ "$reached" -ge "${{ inputs.steps }}" ]; then
+            echo "::notice::Reached step $reached of ${{ inputs.steps }} - chain complete."
+            exit 0
+          fi
+          echo "::notice::At step $reached of ${{ inputs.steps }}; queueing the next run."
+          gh workflow run train.yml \
+            -f steps="${{ inputs.steps }}" \
+            -f max_hours="${{ inputs.max_hours }}" \
+            -f resume=true \
+            -f finetune="${{ inputs.finetune }}" \
+            -f chain=true

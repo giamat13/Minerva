@@ -25,6 +25,11 @@ __all__ = ["TokenDataset", "encode_corpus"]
 _TOKEN_DTYPE = np.uint16
 
 
+#: Text read per encode block. Large enough that per-call overhead is
+#: negligible, small enough that the block and its ids stay small.
+_ENCODE_BLOCK_CHARS = 4_000_000
+
+
 def encode_corpus(
     text_path: Path, tokenizer: BPETokenizer, out_path: Path, *, verbose: bool = True
 ) -> int:
@@ -38,39 +43,48 @@ def encode_corpus(
             f"vocab_size {tokenizer.vocab_size} does not fit in {_TOKEN_DTYPE.__name__}"
         )
 
-    text = text_path.read_text(encoding="utf-8")
     started = time.time()
-
-    # Encoding 27 MB in one call would hold a very large intermediate list;
-    # chunking keeps peak memory flat and lets us report progress.
-    ids: list[int] = []
-    chunk_size = 1_000_000
-    position = 0
-    while position < len(text):
-        end = min(position + chunk_size, len(text))
-        # Extend to the next newline so we never split mid-token-boundary.
-        if end < len(text):
-            newline = text.find("\n", end)
-            end = newline + 1 if newline != -1 else len(text)
-        ids.extend(tokenizer.encode(text[position:end]))
-        position = end
-        if verbose:
-            print(
-                f"    {position / len(text) * 100:5.1f}%  {len(ids):,} tokens",
-                end="\r",
-                flush=True,
-            )
-
-    array = np.asarray(ids, dtype=_TOKEN_DTYPE)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    array.tofile(out_path)
+
+    # Streamed, never materialised whole. The v0.5.0 corpus is ~1.9 GB of text
+    # and ~518M tokens: read_text() alone needs the file twice over (str plus
+    # the decode buffer), and accumulating the ids in a Python list costs ~28
+    # bytes each, about 14 GB. Reading line-blocks and appending each block's
+    # ids straight to the file keeps peak memory flat regardless of corpus
+    # size. Document boundaries are still respected - blocks end on newlines,
+    # and the separator lives on its own lines - so no token spans a block.
+    total = 0
+    characters = 0
+    # Progress is measured in characters against the file's byte size, which
+    # is approximate for non-ASCII text and deliberately so: the exact
+    # alternative, handle.tell(), raises "telling position disabled by next()
+    # call" once readlines() has been used on the handle. That exception
+    # silently truncated the first v0.5.0 tokenization to 1.1M of 518M tokens,
+    # so this number stays a cheap estimate rather than an exact offset.
+    size = max(1, text_path.stat().st_size)
+    with text_path.open("r", encoding="utf-8") as handle, out_path.open("wb") as sink:
+        while True:
+            block = handle.readlines(_ENCODE_BLOCK_CHARS)
+            if not block:
+                break
+            chunk = "".join(block)
+            characters += len(chunk)
+            ids = tokenizer.encode(chunk)
+            np.asarray(ids, dtype=_TOKEN_DTYPE).tofile(sink)
+            total += len(ids)
+            if verbose:
+                print(
+                    f"    {characters / size * 100:5.1f}%  {total:,} tokens",
+                    end="\r",
+                    flush=True,
+                )
 
     if verbose:
         print(
-            f"    {out_path.name}: {len(array):,} tokens "
-            f"({len(text) / max(1, len(array)):.2f} chars/token, {time.time() - started:.0f}s)"
+            f"    {out_path.name}: {total:,} tokens "
+            f"({characters / max(1, total):.2f} chars/token, {time.time() - started:.0f}s)"
         )
-    return len(array)
+    return total
 
 
 class TokenDataset:

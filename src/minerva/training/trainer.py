@@ -229,6 +229,33 @@ class Trainer:
     def load_checkpoint(self, path: Path) -> None:
         """Resume from a checkpoint written by :meth:`save_checkpoint`."""
         payload = torch.load(path, map_location=self.device, weights_only=False)
+
+        # Resuming across an architecture change is the one failure that must
+        # not be cryptic. load_state_dict would raise a wall of per-tensor
+        # shape errors; the config comparison says the actual thing that is
+        # wrong and what to do about it. v0.5.0 grew Swift from 9.9M to 23.2M,
+        # so every pre-v0.5.0 checkpoint hits this.
+        saved_config = payload.get("model_config")
+        if saved_config:
+            current = self.model.config.to_dict()
+            differing = {
+                key: (saved_config.get(key), current.get(key))
+                for key in ("n_layer", "d_model", "n_head", "vocab_size", "d_ff")
+                if key in saved_config and saved_config.get(key) != current.get(key)
+            }
+            if differing:
+                detail = ", ".join(
+                    f"{key}: checkpoint {was!r} vs current {now!r}"
+                    for key, (was, now) in differing.items()
+                )
+                raise ValueError(
+                    f"cannot resume from {path}: it was trained with a different "
+                    f"architecture ({detail}). A checkpoint only resumes into the "
+                    f"shape it was trained as. Either train into a fresh --out "
+                    f"directory, or point --resume at a checkpoint of the current "
+                    f"architecture."
+                )
+
         self.model.load_state_dict(payload["model_state"])
         self.optimizer.load_state_dict(payload["optimizer_state"])
         saved = payload.get("state", {})
