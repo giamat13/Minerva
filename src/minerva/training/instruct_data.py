@@ -93,6 +93,10 @@ class InstructExample:
     """Only for tools whose output is not reproducible (the clock)."""
     pinned: bool = False
     """True when ``result`` is supplied rather than computed by running the tool."""
+    expect_error: bool = False
+    """True when the declared call is *meant* to fail, and the real error text
+    is the training signal. Without this a failing tool is treated as a broken
+    example; with it, the example instead breaks if the tool starts succeeding."""
     history: tuple[tuple[str, str], ...] = field(default=())
     """Earlier (user, assistant) turns, for the multi-turn examples."""
 
@@ -1009,7 +1013,18 @@ _REBALANCE: tuple[InstructExample, ...] = (
     # More things it should decline rather than invent.
     InstructExample(
         user="What is the exchange rate for the euro?",
-        answer="I do not know. I have no access to live rates.",
+        think="A live rate is exactly what the search tool is for.",
+        call=("web_search", {"query": "euro exchange rate today"}),
+        result=(
+            "Euro to US Dollar Exchange Rate - XE\n"
+            "https://www.xe.com/currencyconverter/convert/?From=EUR&To=USD\n"
+            "1 EUR = 1.09 USD"
+        ),
+        pinned=True,
+        answer=(
+            "A search shows about 1.09 US dollars to the euro. Rates move "
+            "through the day, so check a live source before acting on it."
+        ),
     ),
     InstructExample(
         user="Who is the CEO of that company?",
@@ -1033,11 +1048,21 @@ _REBALANCE: tuple[InstructExample, ...] = (
     ),
     InstructExample(
         user="Search the web for me.",
-        answer="I cannot search the web. I have no network access.",
+        answer="Happy to. What would you like me to search for?",
     ),
     InstructExample(
         user="Tell me about a book published last year.",
-        answer="I do not know. My training data does not cover recent books.",
+        call=("web_search", {"query": "notable books published last year"}),
+        result=(
+            "Best Books of the Year - The Guardian\n"
+            "https://www.theguardian.com/books\n"
+            "Critics pick the year's standout fiction and non-fiction titles."
+        ),
+        pinned=True,
+        answer=(
+            "I looked it up rather than guess from memory. If you tell me a "
+            "genre or an author, I can search for something more specific."
+        ),
     ),
     InstructExample(
         user="How old am I?",
@@ -2089,6 +2114,89 @@ _HEBREW: tuple[InstructExample, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Tool calls that fail, and what to say next.
+#
+# Every other tool section in this file shows a call that works. Nothing taught
+# the model what to do when one does not, and a tool's error message is prompt
+# text the model has to act on (CLAUDE.md section 5) - so the failure path
+# needs real examples exactly as much as the success path does.
+#
+# The habit being taught is narrow and deliberate: say plainly that the lookup
+# failed, never present a remembered guess as if the tool had returned it. A
+# model that answers from memory when the search breaks is confabulating at the
+# precise moment it looks most authoritative, which is the failure this whole
+# project is built to avoid.
+#
+# `result` is pinned here because these outputs are real tool *errors*, and the
+# build cannot produce them on demand by running a working tool.
+# ---------------------------------------------------------------------------
+
+_TOOL_FAILURE: tuple[InstructExample, ...] = (
+    InstructExample(
+        user="What is the population of Chile?",
+        call=("web_search", {"query": "population of Chile"}),
+        result="Error: the search timed out after 10 seconds.",
+        pinned=True,
+        answer=(
+            "The search timed out, so I could not check. I would rather tell "
+            "you that than guess at a number. Try me again in a moment."
+        ),
+    ),
+    InstructExample(
+        user="Who holds the world record for the marathon?",
+        call=("web_search", {"query": "marathon world record holder"}),
+        result="Error: no results found.",
+        pinned=True,
+        answer=(
+            "That search came back empty. I do not want to answer from memory "
+            "on a record that changes, so I have nothing reliable for you yet."
+        ),
+    ),
+    # Not pinned: these two tools really do fail this way, so the build runs
+    # them and the training data carries their actual error text rather than a
+    # plausible-looking imitation of it.
+    InstructExample(
+        user="What is 8 divided by 0?",
+        call=("calculate", {"expression": "8 / 0"}),
+        expect_error=True,
+        answer=(
+            "Dividing by zero is undefined, so there is no answer to give. "
+            "The calculator rejected it for the same reason."
+        ),
+    ),
+    InstructExample(
+        user="What time is it on Mars?",
+        call=("current_time", {"timezone": "Mars/Olympus"}),
+        expect_error=True,
+        answer=(
+            "There is no timezone for Mars, so the clock could not read one. "
+            "Name a city on Earth and I will tell you the time there."
+        ),
+    ),
+    InstructExample(
+        user="כמה עולה כרטיס טיסה לרומא?",
+        call=("web_search", {"query": "flight ticket price to Rome"}),
+        result="Error: the search timed out after 10 seconds.",
+        pinned=True,
+        answer=(
+            "החיפוש נכשל, אז לא הצלחתי לבדוק. עדיף שאגיד לך את זה מאשר לנחש "
+            "מחיר. אפשר לנסות שוב עוד רגע."
+        ),
+    ),
+    InstructExample(
+        user="How many days until the next solar eclipse?",
+        call=("web_search", {"query": "next solar eclipse date"}),
+        result="Error: the search service returned status 503.",
+        pinned=True,
+        answer=(
+            "The search service is down right now, so I could not look up the "
+            "date. I do not have a dependable one in memory to fall back on."
+        ),
+    ),
+)
+
+
 #: Every hand-written example, in one tuple.
 INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_CALCULATOR,
@@ -2099,6 +2207,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_THINKING_NO_TOOL,
     *_UNKNOWN,
     *_WEB_SEARCH,
+    *_TOOL_FAILURE,
     *_REBALANCE,
     *_MULTI_TURN,
     *_TALK_NATURALLY,
@@ -2146,9 +2255,20 @@ def build_examples(
                 result_text = example.result
             else:
                 outcome = registry.execute(call)
-                if outcome.is_error:
+                # A failing tool is normally a broken example, so it still
+                # raises. The exception is an example that is *about* the
+                # failure path (`expect_error`), where the real error text is
+                # the training signal - and which raises in the other direction
+                # if the tool unexpectedly starts succeeding, so the example
+                # cannot quietly stop teaching what it claims to teach.
+                if outcome.is_error and not example.expect_error:
                     raise ValueError(
                         f"{example.user!r}: declared tool call failed: {outcome.content}"
+                    )
+                if example.expect_error and not outcome.is_error:
+                    raise ValueError(
+                        f"{example.user!r}: expect_error is set but the tool succeeded: "
+                        f"{outcome.content}"
                     )
                 result_text = outcome.content
 

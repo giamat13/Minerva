@@ -44,7 +44,23 @@ class TestPretokenization:
 
     def test_digits_are_always_split_individually(self) -> None:
         # Grouped digits ruin place-value consistency, so 1987 must be 4 tokens.
-        assert _pretokenize("in 1987") == ["in", " 1", "9", "8", "7"]
+        # The leading space is its own piece rather than riding on the first
+        # digit: this test used to expect " 1", which made a number's tokens
+        # depend on what preceded it. See the next test for why that mattered.
+        assert _pretokenize("in 1987") == ["in", " ", "1", "9", "8", "7"]
+
+    def test_a_number_tokenizes_identically_wherever_it_appears(self) -> None:
+        # The property that makes operand copying learnable at all. When the
+        # leading space fused onto the first digit, "314" was [' 3','1','4'] in
+        # "What is 314 plus 159?" but ['3','1','4'] in the expression "314 +
+        # 159" - so copying an operand into a tool call was a different token
+        # edit for every number, and the finetuned model invented digits
+        # instead ("Add 314 and 159" -> "314 times 15 is 471").
+        in_question = _pretokenize("What is 314 plus 159?")
+        in_expression = _pretokenize("314 + 159")
+        for run in (in_question, in_expression):
+            digits = [p for p in run if p.isdigit()]
+            assert digits == ["3", "1", "4", "1", "5", "9"]
 
     def test_punctuation_runs_group_together(self) -> None:
         assert "..." in _pretokenize("wait... really")

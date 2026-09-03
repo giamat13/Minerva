@@ -121,7 +121,10 @@ class TestToolResultsAreReal:
             tool_message = next(m for m in messages if m.role is Role.TOOL)
             name, arguments = example.call
             expected = registry.execute(ToolCall(name=name, arguments=arguments))
-            assert not expected.is_error
+            # The point of this test is that a stored result is what the tool
+            # really returns. That holds for the failure-path examples too, so
+            # the check is `is_error` matching intent rather than never erroring.
+            assert expected.is_error == example.expect_error
             assert tool_message.content == expected.content
             checked += 1
 
