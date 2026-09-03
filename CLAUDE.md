@@ -73,6 +73,35 @@ hit a row count, and that what is there is real.
   few fixed phrases and confabulate on anything else — the same failure this
   rule exists to prevent, in a new language instead of a new fact.
 
+### Algorithmic examples: sentence *structure* only, never vocabulary
+
+Generated examples are allowed for exactly one purpose — teaching the model
+how a sentence is **put together** — and are forbidden for teaching it *what
+to put in one*.
+
+The failure this rule exists to prevent is a real one from an earlier attempt
+at building a model here: it was trained entirely on algorithmic data, so
+asked for "a creative name for a shop" it answered "shop" plus a random
+adjective drawn from the five it had ever seen. It had learned a template,
+not a language, and the template was visible in every answer.
+
+- ✅ **Allowed:** generated examples that vary *structure* - clause order,
+  question versus statement, tense, agreement, how a reply attaches to a
+  question. The thing being learned is the shape.
+- ❌ **Forbidden:** generated examples that vary *content* from a fixed pool -
+  slotting nouns, adjectives, names, places or numbers out of a list. That
+  teaches a closed vocabulary and produces exactly the "shop + random
+  adjective" behaviour above.
+- ✅ **Keep the balance explicit.** Hand-written examples must stay the
+  substantial share of any instruct set, and any algorithmic block has to be
+  a named, separately-counted section, so the ratio can be read off the file
+  rather than guessed. If generated examples ever outnumber hand-written
+  ones, that is a decision to argue for in writing, not a drift to discover
+  later.
+- ✅ **Vocabulary comes from the pretraining corpus**, which is real
+  human-written prose, and from nowhere else. That is the whole reason the
+  corpus is 185 MB of literature rather than a phrase list.
+
 ### The standard
 
 > A hundred examples someone thought hard about beat a hundred thousand a
@@ -324,6 +353,17 @@ Rules that keep the two from corrupting each other:
 שחשבו עליהן שוות יותר ממאה אלף שסקריפט ייצר. אם אי אפשר להסביר למה דוגמה
 מסוימת נמצאת בדאטהסט — היא לא צריכה להיות שם. אותו כלל חל גם על סטים של הערכה
 (eval).
+
+**אלגוריתמים — רק למבנה משפט, אף פעם לא לאוצר מילים.**
+מותר לייצר דוגמאות אלגוריתמית למטרה אחת בלבד: ללמד איך *בונים* משפט — סדר
+הפסוקיות, שאלה מול קביעה, זמן, התאמה, איך תשובה נקשרת לשאלה. **אסור** לייצר
+דוגמאות שממלאות תוכן מתוך רשימה סגורה (שמות עצם, שמות תואר, מקומות, מספרים):
+זה מלמד אוצר מילים סגור. זה בדיוק הכישלון מניסיון קודם לבנות מודל כאן —
+הוא אומן רק על אלגוריתם, וכשביקשו ממנו "שם יצירתי לחנות" הוא ענה "חנות" ועוד
+שם תואר אקראי מתוך החמישה שהכיר. הוא למד תבנית, לא שפה. **חובה לשמור על
+איזון מפורש**: הדוגמאות הידניות נשארות החלק המשמעותי, וכל בלוק אלגוריתמי
+יושב בסקשן נפרד וסָפוּר, כך שאפשר לקרוא את היחס מהקובץ ולא לנחש אותו. אוצר
+המילים מגיע מקורפוס האימון המקדים — פרוזה אנושית אמיתית — ומשום מקום אחר.
 
 **הכי חשוב: המודל תמיד צריך לדעת להגיד "אני לא יודע".** זו ההרגל הכי חשוב
 שמודל של Minerva לומד — יותר חשוב מכל עובדה בודדת. תשובה שגויה שנאמרת בביטחון

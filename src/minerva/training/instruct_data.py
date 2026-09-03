@@ -1560,6 +1560,176 @@ _WHAT_IS_IT: tuple[InstructExample, ...] = (
         pinned=True,
         answer="הבירה של יפן היא טוקיו.",
     ),
+    # -- Widened after measurement. Eight examples were not enough signal
+    #    against 311: the served model still answered "What is an apple?"
+    #    with "I have no apple." rather than searching. Phrasings are varied
+    #    deliberately - "what is", "who was", "tell me about", "where is",
+    #    "what does X do" - because a model trained on one sentence shape
+    #    learns the shape, not the habit.
+    InstructExample(
+        user="What is a glacier?",
+        call=("web_search", {"query": "what is a glacier"}),
+        result=(
+            "Glacier - National Geographic\n"
+            "https://education.nationalgeographic.org/resource/glacier/\n"
+            "A glacier is a huge mass of ice that moves slowly over land, formed "
+            "from compacted snow over many years."
+        ),
+        pinned=True,
+        answer=(
+            "A glacier is a large mass of ice that moves slowly over land, formed "
+            "from snow compacted over many years."
+        ),
+    ),
+    InstructExample(
+        user="What is photosynthesis?",
+        call=("web_search", {"query": "what is photosynthesis"}),
+        result=(
+            "Photosynthesis - Britannica\n"
+            "https://www.britannica.com/science/photosynthesis\n"
+            "The process by which green plants use sunlight to turn carbon dioxide "
+            "and water into food, releasing oxygen."
+        ),
+        pinned=True,
+        answer=(
+            "Photosynthesis is how green plants use sunlight to turn carbon dioxide "
+            "and water into food, giving off oxygen as they do."
+        ),
+    ),
+    InstructExample(
+        user="Who was Marie Curie?",
+        call=("web_search", {"query": "who was Marie Curie"}),
+        result=(
+            "Marie Curie - Britannica\n"
+            "https://www.britannica.com/biography/Marie-Curie\n"
+            "Polish-born physicist and chemist (1867-1934), the first woman to win "
+            "a Nobel Prize and the only person to win one in two sciences."
+        ),
+        pinned=True,
+        answer=(
+            "Marie Curie was a Polish-born physicist and chemist, the first woman "
+            "to win a Nobel Prize and the only person to win one in two sciences."
+        ),
+    ),
+    InstructExample(
+        user="Where is Mount Everest?",
+        call=("web_search", {"query": "where is Mount Everest located"}),
+        result=(
+            "Mount Everest - Britannica\n"
+            "https://www.britannica.com/place/Mount-Everest\n"
+            "On the border between Nepal and the Tibet Autonomous Region of China, "
+            "in the Himalayas."
+        ),
+        pinned=True,
+        answer="Mount Everest sits on the border between Nepal and Tibet, in the Himalayas.",
+    ),
+    InstructExample(
+        user="Tell me about the Sahara.",
+        call=("web_search", {"query": "Sahara desert facts"}),
+        result=(
+            "Sahara - Britannica\n"
+            "https://www.britannica.com/place/Sahara-desert-Africa\n"
+            "The largest hot desert in the world, covering much of North Africa, "
+            "about 8.6 million square kilometres."
+        ),
+        pinned=True,
+        answer=(
+            "The Sahara is the largest hot desert in the world, covering much of "
+            "North Africa - around 8.6 million square kilometres."
+        ),
+    ),
+    InstructExample(
+        user="What does a barometer do?",
+        call=("web_search", {"query": "what does a barometer do"}),
+        result=(
+            "Barometer - Britannica\n"
+            "https://www.britannica.com/technology/barometer\n"
+            "An instrument for measuring atmospheric pressure, used in weather "
+            "forecasting and to determine altitude."
+        ),
+        pinned=True,
+        answer=(
+            "A barometer measures atmospheric pressure, which is why it is used "
+            "for weather forecasting and for working out altitude."
+        ),
+    ),
+    InstructExample(
+        user="What is a symphony?",
+        call=("web_search", {"query": "what is a symphony music"}),
+        result=(
+            "Symphony - Britannica\n"
+            "https://www.britannica.com/art/symphony\n"
+            "An extended musical composition for orchestra, usually in several "
+            "movements."
+        ),
+        pinned=True,
+        answer=(
+            "A symphony is a long piece of music written for orchestra, usually "
+            "in several movements."
+        ),
+    ),
+    InstructExample(
+        user="What is the Pacific Ocean?",
+        call=("web_search", {"query": "Pacific Ocean facts"}),
+        result=(
+            "Pacific Ocean - Britannica\n"
+            "https://www.britannica.com/place/Pacific-Ocean\n"
+            "The largest and deepest of the world's oceans, covering about a third "
+            "of the Earth's surface."
+        ),
+        pinned=True,
+        answer=(
+            "The Pacific is the largest and deepest ocean on Earth, covering roughly "
+            "a third of the planet's surface."
+        ),
+    ),
+    InstructExample(
+        user="מה זה קרחון?",
+        call=("web_search", {"query": "מה זה קרחון"}),
+        result=(
+            "קרחון - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/קרחון\n"
+            "קרחון הוא גוש קרח גדול הנע לאט על פני היבשה, ונוצר משלג שנדחס לאורך שנים."
+        ),
+        pinned=True,
+        answer="קרחון הוא גוש קרח גדול שנע לאט על היבשה, ונוצר משלג שנדחס במשך שנים רבות.",
+    ),
+    InstructExample(
+        user="מי הייתה מארי קירי?",
+        call=("web_search", {"query": "מי הייתה מארי קירי"}),
+        result=(
+            "מארי קירי - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/מארי_קירי\n"
+            "פיזיקאית וכימאית ילידת פולין, האישה הראשונה שזכתה בפרס נובל."
+        ),
+        pinned=True,
+        answer="מארי קירי הייתה פיזיקאית וכימאית ילידת פולין, האישה הראשונה שזכתה בפרס נובל.",
+    ),
+    InstructExample(
+        user="איפה נמצא האוורסט?",
+        call=("web_search", {"query": "איפה נמצא הר האוורסט"}),
+        result=(
+            "הר האוורסט - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/הר_האוורסט\n"
+            "על הגבול בין נפאל לטיבט, ברכס ההימלאיה."
+        ),
+        pinned=True,
+        answer="הר האוורסט נמצא על הגבול בין נפאל לטיבט, ברכס ההימלאיה.",
+    ),
+    InstructExample(
+        user="ספר לי על הים התיכון.",
+        call=("web_search", {"query": "הים התיכון עובדות"}),
+        result=(
+            "הים התיכון - ויקיפדיה\n"
+            "https://he.wikipedia.org/wiki/הים_התיכון\n"
+            "ים בין אירופה, אסיה ואפריקה, המחובר לאוקיינוס האטלנטי במיצר גיברלטר."
+        ),
+        pinned=True,
+        answer=(
+            "הים התיכון נמצא בין אירופה, אסיה ואפריקה, ומחובר לאוקיינוס האטלנטי "
+            "דרך מיצר גיברלטר."
+        ),
+    ),
 )
 
 

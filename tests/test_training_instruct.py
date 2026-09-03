@@ -261,6 +261,22 @@ class TestRelevanceExpectations:
                     f"{case.prompt!r} has marker {marker!r}, too short to mean anything"
                 )
 
+    def test_no_marker_is_a_bare_pronoun_or_filler(self) -> None:
+        """Found by hand-checking the scorer against real replies.
+
+        "איך קוראים לך?" answered "אני מודה על זה." scored as relevant purely
+        because "אני" ("I") was in the marker list - a word that appears in
+        almost any first-person reply and says nothing about whether the
+        question was engaged. The percentage looked fine; the verdict was
+        wrong. Percentages get spot-checked by eye for this reason.
+        """
+        banned = {"אני", "am", "is", "the", "a", "i", "it", "של", "זה", "הוא"}
+        for case in EVAL_CASES:
+            for marker in case.relevant_if:
+                assert marker.lower().strip() not in banned, (
+                    f"{case.prompt!r} uses {marker!r}, which matches almost any reply"
+                )
+
     def test_every_conversational_case_says_what_relevant_means(self) -> None:
         """Otherwise it silently falls through to the tool-call default.
 

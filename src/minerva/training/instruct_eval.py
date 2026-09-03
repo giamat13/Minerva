@@ -151,9 +151,28 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     EvalCase("מה השעה בלונדון?", "current_time"),
     EvalCase("כמה ימים יש בין 2026-02-01 ל-2026-02-28?", "days_between", "27"),
     EvalCase("ערב טוב.", None, relevant_if=("ערב", "בוקר", "שלום", "טוב")),
-    EvalCase("איך קוראים לך?", None, relevant_if=("swift", "שם", "קוראים", "אני")),
+    EvalCase("איך קוראים לך?", None, relevant_if=("swift", "שם", "קוראים")),
     EvalCase("מי המנכ״ל של החברה?", None, expects_refusal=True),
     EvalCase("מה מחיר המניה של אפל היום?", "web_search"),
+    # -- Bare, everyday openers. Added in v0.4.0 after a hand-audit showed the
+    #    set above was measuring the wrong thing: every prompt in it is a
+    #    well-formed sentence sitting near the training distribution, while a
+    #    real user opens with "Hi" or "שלום" and judges the model on that.
+    #    Under served conditions those scored roughly 40%, against a headline
+    #    relevance of 75% - the gap was the eval's, not the model's.
+    EvalCase("Hi", None, relevant_if=("hi", "hello", "hey", "help")),
+    EvalCase("Hey there", None, relevant_if=("hi", "hello", "hey", "help")),
+    EvalCase("Thanks!", None,
+             relevant_if=("welcome", "glad", "pleasure", "happy", "any time", "sure")),
+    EvalCase("Could you give me a hand?", None,
+             relevant_if=("yes", "sure", "help", "what", "can", "hand")),
+    EvalCase("So what exactly are you?", None,
+             relevant_if=("swift", "model", "minerva")),
+    EvalCase("שלום", None, relevant_if=("שלום", "היי", "עזור", "אפשר")),
+    EvalCase("היי", None, relevant_if=("שלום", "היי", "עזור", "אפשר")),
+    EvalCase("בוקר טוב", None, relevant_if=("בוקר", "טוב", "שלום")),
+    EvalCase("תודה", None, relevant_if=("בבקשה", "בשמחה", "שמח", "אין בעד מה")),
+    EvalCase("מה אתה בעצם?", None, relevant_if=("swift", "מודל", "פרמטרים")),
 )
 
 _REFUSAL_MARKERS = (
@@ -190,6 +209,23 @@ _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 # test is which script *dominates*, not whether the other appears at all.
 _HEBREW_LETTER = re.compile(r"[֐-׿]")
 _LATIN_LETTER = re.compile(r"[A-Za-z]")
+
+
+def _marker_matches(marker: str, text: str) -> bool:
+    """Whole-word match for a single word, plain containment for a phrase.
+
+    Substring matching silently over-scores: "am" is inside "name" and
+    "example", so a reply of "I have no name." would count as engaging
+    "what are you?". A single-word marker therefore has to match on word
+    boundaries. Multi-word markers ("any time") keep containment, since the
+    boundary is already implied by the space.
+    """
+    marker = marker.lower().strip()
+    if not marker:
+        return False
+    if " " in marker:
+        return marker in text
+    return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text) is not None
 
 
 def _dominant_script(text: str) -> str | None:
@@ -253,6 +289,7 @@ def evaluate_instruct(
     cases: tuple[EvalCase, ...] = EVAL_CASES,
     thinking: str | int | None = None,
     seed: int = 1729,
+    greedy: bool = True,
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Run the held-out evaluation through the real agent loop.
@@ -309,7 +346,11 @@ def evaluate_instruct(
             model,
             tools=registry,
             thinking=thinking,
-            sampling=SamplingParams(seed=seed, temperature=0.0),
+            sampling=(
+                SamplingParams(seed=seed, temperature=0.0)
+                if greedy
+                else SamplingParams(seed=seed)
+            ),
             max_iterations=3,
         )
         try:
@@ -365,7 +406,7 @@ def evaluate_instruct(
         # the first month" is the failure a user calls "unrelated".
         low = answer.lower()
         if case.relevant_if:
-            relevant = any(marker.lower() in low for marker in case.relevant_if)
+            relevant = any(_marker_matches(marker, low) for marker in case.relevant_if)
         elif case.expects_refusal:
             relevant = any(m in low for m in _REFUSAL_MARKERS)
         elif case.expected_value is not None:
@@ -430,6 +471,7 @@ def evaluate_instruct(
     summary = {
         "model": model_name,
         "seed": seed,
+        "decoding": "greedy" if greedy else "sampled (as served)",
         "thinking": str(thinking) if thinking else "do",
         "cases": totals["cases"],
         "format_valid_pct": pct("format_ok", "cases"),
