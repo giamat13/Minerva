@@ -1,0 +1,134 @@
+{
+  "sources": [
+    {
+      "name": "gutenberg",
+      "chunks": 723,
+      "chunks_train": 719,
+      "chunks_val": 4,
+      "skipped_too_short": 0,
+      "characters": 11713240,
+      "characters_val": 64171,
+      "licence": "Public domain",
+      "origin": "Project Gutenberg (18 complete books), via the NLTK data distribution",
+      "description": "Literary prose and verse: Austen, Melville, Milton, Shakespeare, Chesterton, Whitman, the King James Bible. The backbone of the corpus - long-form, carefully edited, correctly typeset English.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/gutenberg.zip"
+    },
+    {
+      "name": "gutenberg_extended",
+      "chunks": 5641,
+      "chunks_train": 5612,
+      "chunks_val": 29,
+      "skipped_too_short": 0,
+      "characters": 88980311,
+      "characters_val": 460073,
+      "licence": "Public domain (Project Gutenberg licence stripped with the header)",
+      "origin": "Project Gutenberg, fetched per-book by ebook id from gutenberg.org - 119 curated titles, see _GUTENBERG_EXTENDED_IDS",
+      "description": "The volume that makes fluency possible: 119 canonical English books across novels, gothic, detective, adventure, early science fiction, children's literature, essays, philosophy, drama and translated classics. Chosen for register diversity rather than raw size, verified to resolve and de-duplicated against the 18 books the `gutenberg` source above already ships.",
+      "url": "https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt"
+    },
+    {
+      "name": "brown",
+      "chunks": 500,
+      "chunks_train": 497,
+      "chunks_val": 3,
+      "skipped_too_short": 0,
+      "characters": 5977790,
+      "characters_val": 33168,
+      "licence": "Distributed with the permission of the copyright holder (Brown University); redistribution permitted",
+      "origin": "The Brown Corpus (Francis & Kucera, 1964/1979), via the NLTK data distribution - 500 samples of c.1961 American English",
+      "description": "Short, declarative press reportage, editorial and fiction - the register Reuters and Wikipedia used to supply, restored here without their factual content: 1961 news is neither current nor worth memorising, only worth imitating the sentence structure of. Rejected in earlier versions for a formatting reason (distributed POS-tagged) that turned out to be a solvable cleaning problem, not a reason to exclude the text - see the module docstring.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/brown.zip"
+    },
+    {
+      "name": "webtext",
+      "chunks": 67,
+      "chunks_train": 66,
+      "chunks_val": 1,
+      "skipped_too_short": 0,
+      "characters": 1715707,
+      "characters_val": 15861,
+      "licence": "Freely redistributable, see the corpus README",
+      "origin": "NLTK web text sample: forum posts, reviews, film script",
+      "description": "Informal, contemporary, conversational writing. The only source here with a modern casual register.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/webtext.zip"
+    },
+    {
+      "name": "inaugural",
+      "chunks": 79,
+      "chunks_train": 78,
+      "chunks_val": 1,
+      "skipped_too_short": 0,
+      "characters": 823859,
+      "characters_val": 6502,
+      "licence": "Public domain (US federal government work)",
+      "origin": "US presidential inaugural addresses, 1789-2021",
+      "description": "Formal oratory: rhetorical, structured, spoken-for-an-audience prose.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/inaugural.zip"
+    },
+    {
+      "name": "state_union",
+      "chunks": 110,
+      "chunks_train": 109,
+      "chunks_val": 1,
+      "skipped_too_short": 0,
+      "characters": 2067620,
+      "characters_val": 15779,
+      "licence": "Public domain (US federal government work)",
+      "origin": "US State of the Union addresses, 1945-2006",
+      "description": "More formal oratory, and a second register of political language.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/state_union.zip"
+    },
+    {
+      "name": "europarl_en",
+      "chunks": 73,
+      "chunks_train": 72,
+      "chunks_val": 1,
+      "skipped_too_short": 0,
+      "characters": 3059524,
+      "characters_val": 28074,
+      "licence": "European Parliament proceedings - freely available",
+      "origin": "European Parliament proceedings (English portion), via NLTK",
+      "description": "Transcribed parliamentary debate: long, subordinate-clause-heavy sentences that none of the other sources supply.",
+      "url": "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/corpora/europarl_raw.zip"
+    },
+    {
+      "name": "benyehuda",
+      "chunks": 10623,
+      "chunks_train": 10569,
+      "chunks_val": 54,
+      "skipped_too_short": 167,
+      "characters": 71087940,
+      "characters_val": 361741,
+      "licence": "Public domain",
+      "origin": "Project Ben-Yehuda, https://benyehuda.org - the release tagged 2026-03 of https://github.com/projectbenyehuda/public_domain_dump",
+      "description": "Hebrew literature, Swift's first non-English source: original (non-translated) poetry, prose, drama and essays by seven canonical figures of modern Hebrew writing - Bialik, Rachel Bluwstein, Brenner, Ahad Ha'am, Mendele Mocher Sforim, Tchernichovsky and Frishman. The Hebrew analogue of the Gutenberg entry above: curated authors, not the whole library - see _iter_benyehuda_texts for the selection criteria.",
+      "url": "https://github.com/projectbenyehuda/public_domain_dump/releases/download/2026-03/txt.zip"
+    }
+  ],
+  "chunks": {
+    "train": 17722,
+    "val": 94
+  },
+  "max_chunk_chars": 16384,
+  "characters": {
+    "train": 184741879,
+    "val": 986950
+  },
+  "split": {
+    "val_fraction": 0.005,
+    "seed": 1729,
+    "unit": "chunk, held out per source by character count"
+  },
+  "sha256": {
+    "train": "309ce41118ec63415b0d8c77ae71814008b61c9d77b3d2d77e93135e1a86c75c",
+    "val": "9c95fe0fc7affecd47804fabf05b24ebcff25df9f2e88f1ea251e09a0a407477"
+  },
+  "excluded": {
+    "movie_reviews": "distributed lowercased and pre-tokenised; casing and spacing destroyed",
+    "oscar-2301_he": "gated web scrape; no per-document quality signal",
+    "sefaria_hebrew_library": "GPL-3.0 on text data, and a liturgical/legal register, not prose",
+    "wikipedia_full_en": "6.4M articles, tens of GB; too large to review - used the 'simple' config, sampled and filtered, instead",
+    "wikipedia_simple_en": "removed in v0.3.0: a 9.9M-parameter model cannot reliably retain encyclopedic facts, only imitate their register while confabulating the content. web_search gives Swift a way to look facts up instead of memorizing them wrong.",
+    "reuters": "removed in v0.3.0: news content teaches specific, dated real-world events as if they were stable facts to recite. web_search is the honest substitute - current events belong in a lookup, not in frozen weights."
+  }
+}

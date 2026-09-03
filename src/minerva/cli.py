@@ -265,6 +265,12 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+#: How much text the BPE tokenizer is trained on. 200 MB is far past the point
+#: where merge frequencies stop moving, and keeps peak memory bounded no matter
+#: how large the corpus grows.
+_TOKENIZER_SAMPLE_BYTES = 200_000_000
+
+
 def cmd_prepare_data(args: argparse.Namespace) -> int:
     """Build the corpus, train the tokenizer, and pack tokens - all for real."""
     from .training.data import build_corpus
@@ -286,7 +292,32 @@ def cmd_prepare_data(args: argparse.Namespace) -> int:
         tokenizer = BPETokenizer.load(tokenizer_path)
     else:
         print(style.bold(f"\n2/3  training a byte-level BPE tokenizer (vocab {args.vocab_size})"))
-        text = (data_dir / "train.txt").read_text(encoding="utf-8")
+        # Trained on a bounded sample, not the whole corpus. BPE merge
+        # frequencies converge long before a gigabyte, and reading the v0.5.0
+        # corpus whole needs it twice over (str + encoded bytes) - which is
+        # what killed the first build with MemoryError. The sample is taken
+        # from evenly spaced points so it reflects the shuffled source mixture
+        # rather than whichever source happens to sort first.
+        train_path = data_dir / "train.txt"
+        total = train_path.stat().st_size
+        budget = min(total, _TOKENIZER_SAMPLE_BYTES)
+        if budget < total:
+            print(
+                style.dim(
+                    f"     sampling {budget / 1e6:.0f} MB of {total / 1e6:.0f} MB "
+                    f"(merge frequencies converge well before the full corpus)"
+                )
+            )
+            parts: list[str] = []
+            windows = 40
+            with train_path.open("r", encoding="utf-8", errors="replace") as handle:
+                for index in range(windows):
+                    handle.seek(total * index // windows)
+                    handle.readline()  # discard the partial line the seek landed in
+                    parts.append(handle.read(budget // windows))
+            text = "".join(parts)
+        else:
+            text = train_path.read_text(encoding="utf-8")
         tokenizer = BPETokenizer.train(text, args.vocab_size)
         tokenizer.save(tokenizer_path)
 

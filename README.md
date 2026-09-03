@@ -340,16 +340,31 @@ git clone https://github.com/giamat13/minerva
 cd minerva
 pip install -e ".[training]"      # torch + numpy + pyarrow, needed to train or run Swift
 
-minerva prepare-data              # ~450 MB raw downloads, curated down to a 50.8 MB corpus
-minerva train                     # pretrains from scratch
-minerva doctor                    # verify: engine ready, checkpoint present
+python scripts/fetch_gutenberg_books.py   # ~1.8 GB of books, resumable
+minerva prepare-data                      # corpus -> tokenizer -> token bins
+minerva train --arch sage                 # pretrains from scratch
+minerva doctor                            # verify: engine ready, checkpoint present
 ```
 
-That 450 MB isn't the corpus size — two sources (Simple English Wikipedia,
-Project Ben-Yehuda) are distributed as one full dump each, and `data.py`
-downloads the whole dump once, caches it, and curates a much smaller slice out
-of it. See [`docs/TRAINING.md`](docs/TRAINING.md) for exactly what is kept and
-why.
+**The corpus is not vendored, but it is reproducible.** No corpus text lives in
+this repository — `data.py` downloads each source from its original
+distributor, so provenance stays verifiable and nobody's corpus is
+redistributed. What *is* committed is everything needed to rebuild the same
+corpus on another machine:
+
+| file | why it is in git |
+|---|---|
+| `data/gutenberg_bulk_ids.json` | the exact 4,526 ebook ids in the bulk corpus. The fetcher walks a seed-shuffled catalogue, but which books land on disk also depends on transient fetch failures and the 30 KB stub threshold — without this list a fresh clone gets a *similar* corpus, not the same one |
+| `data/manifest.json` | per-source licence, character counts and SHA-256 of the built splits |
+| `data/tokenizer.json` | pins how text maps to token ids for a given checkpoint |
+| `data/eval_report.json`, `data/instruct_eval_report.json` | the measured numbers the README and the `DEVDEBUG` panel quote |
+
+The corpus text, the packed `.bin` token arrays and the checkpoint weights stay
+out of git: they are large and fully regenerable from the above. Pass
+`--recatalogue` to `fetch_gutenberg_books.py` to select a fresh book set
+instead of reusing the committed one.
+
+See [`docs/TRAINING.md`](docs/TRAINING.md) for exactly what is kept and why.
 
 The core platform has exactly **one** runtime dependency (`httpx`). PyTorch is
 an optional extra, so using Minerva against an external engine stays a

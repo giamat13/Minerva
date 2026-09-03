@@ -27,13 +27,48 @@ TODO.md
 minerva.local.toml
 .env
 
-# Training artefacts. The corpus is downloaded by `minerva prepare-data`, not
-# vendored (see src/minerva/training/data.py), and checkpoints are large
-# binaries that belong in a release, not in git history.
-data/
+# Training artefacts. The rule: anything large and regenerable stays out; the
+# small files that *describe* a model - and that a reader needs to retrain it
+# or audit a claim - stay in. A fresh clone must be able to rebuild the corpus
+# and retrain from source, which is why the recipe is committed and only the
+# output is not.
+#
+# Out: the corpus text (gigabytes, downloaded by `minerva prepare-data` and
+# never vendored - see src/minerva/training/data.py), packed token arrays,
+# per-experiment eval snapshots, and checkpoint weights, which belong in a
+# release rather than in git history.
+data/*.txt
+data/*.bin
+data/*.json
+data/*.log
+data/cache/
+data_v*/*.txt
+data_v*/*.bin
+data_v*/*.json
+data_v*/cache/
 checkpoints/
 *.pt
-*.bin
+
+# In. gutenberg_bulk_ids.json (40 KB) names the exact ebooks in the bulk
+# corpus: without it a fresh clone gets a *similar* corpus, not the same one,
+# because the fetcher walks a seed-shuffled catalogue and what lands on disk
+# also depends on transient fetch failures and the stub threshold.
+# manifest.json carries each source's licence, character counts and SHA-256 -
+# the provenance CLAUDE.md requires. The two eval reports are the measured
+# numbers the README and the DEVDEBUG panel quote, and a claim with no
+# committed measurement behind it is what this project exists to avoid; the
+# other instruct_eval_*.json files are one-off experiment snapshots and stay
+# out. tokenizer.json pins how text maps to ids for a given checkpoint.
+!data/gutenberg_bulk_ids.json
+!data/manifest.json
+!data/tokenizer.json
+!data/eval_report.json
+!data/instruct_eval_report.json
+!data_v*/manifest.json
+!data_v*/tokenizer.json
+!data/tokenizer.json
+!data_v*/manifest.json
+!data_v*/tokenizer.json
 
 # Scratch downloads of CI artifacts, used to compare a hosted run against
 # the local one (see CLAUDE.md section 8). Not source.

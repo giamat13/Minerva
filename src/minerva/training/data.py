@@ -956,26 +956,36 @@ def build_corpus(
     rng.shuffle(train_docs)
     rng.shuffle(val_docs)
 
-    train_text = DOCUMENT_SEPARATOR.join(train_docs)
-    val_text = DOCUMENT_SEPARATOR.join(val_docs)
+    # Written and hashed in one streaming pass, never materialised whole.
+    # Joining the documents into one string and calling write_text on it needs
+    # the text twice over - once as the str, once as the encoded bytes - which
+    # is ~4 GB at the v0.5.0 corpus size and died with MemoryError on a machine
+    # with room to spare for the corpus itself.
+    def _write_split(path: Path, docs: list[str]) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        characters = 0
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            for index, doc in enumerate(docs):
+                piece = doc if index == 0 else DOCUMENT_SEPARATOR + doc
+                handle.write(piece)
+                digest.update(piece.encode("utf-8"))
+                characters += len(piece)
+        return characters, digest.hexdigest()
 
-    (out_dir / "train.txt").write_text(train_text, encoding="utf-8")
-    (out_dir / "val.txt").write_text(val_text, encoding="utf-8")
+    train_chars, train_sha = _write_split(out_dir / "train.txt", train_docs)
+    val_chars, val_sha = _write_split(out_dir / "val.txt", val_docs)
 
     manifest = {
         "sources": per_source,
         "chunks": {"train": len(train_docs), "val": len(val_docs)},
         "max_chunk_chars": _MAX_CHUNK_CHARS,
-        "characters": {"train": len(train_text), "val": len(val_text)},
+        "characters": {"train": train_chars, "val": val_chars},
         "split": {
             "val_fraction": val_fraction,
             "seed": seed,
             "unit": "chunk, held out per source by character count",
         },
-        "sha256": {
-            "train": hashlib.sha256(train_text.encode("utf-8")).hexdigest(),
-            "val": hashlib.sha256(val_text.encode("utf-8")).hexdigest(),
-        },
+        "sha256": {"train": train_sha, "val": val_sha},
         "excluded": {
             "movie_reviews": (
                 "distributed lowercased and pre-tokenised; casing and spacing destroyed"
