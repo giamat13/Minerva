@@ -6,7 +6,7 @@ inside hours that were agreed, sleeping the rest of the time and picking up
 from the last checkpoint - the trainer already resumes, so a pause costs
 nothing but the pause.
 
-    python scripts/train_nightly.py --from 23:00 --to 07:00
+    python scripts/train_nightly.py --from 00:00 --to 07:15
 
 The default --out is `checkpoints/swift-v05`, deliberately not the v0.3.0
 `checkpoints/swift`: that directory holds 9.9M weights, and resuming a 23M
@@ -58,13 +58,17 @@ def seconds_until(now: datetime, target: clock_time) -> float:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--from", dest="start", default="23:00")
-    parser.add_argument("--to", dest="end", default="07:00")
+    parser.add_argument("--from", dest="start", default="00:00")
+    parser.add_argument("--to", dest="end", default="07:15")
     parser.add_argument("--all-day", action="store_true", help="ignore the window")
     parser.add_argument("--threads", type=int, default=10)
     parser.add_argument("--data", default="data_v05")
     parser.add_argument("--out", default="checkpoints/swift-v05")
-    parser.add_argument("--steps", type=int, default=200_000)
+    parser.add_argument("--steps", type=int, default=63_232)
+    # 100, not the trainer's 500: a checkpoint costs 0.3s to write, so
+    # saving 5x more often is 0.08% overhead, and it caps what an
+    # unexpected reboot can destroy at ~5 minutes instead of ~27.
+    parser.add_argument("--checkpoint-interval", type=int, default=100)
     parser.add_argument("--extra", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
 
@@ -94,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             "--out", args.out,
             "--steps", str(args.steps),
             "--threads", str(args.threads),
+            "--checkpoint-interval", str(args.checkpoint_interval),
         ]
         # Resume from the rolling checkpoint when there is one. `last.pt`, not
         # `best.pt`: best lags actual progress (it only moves when validation
