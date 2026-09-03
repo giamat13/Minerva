@@ -33,7 +33,7 @@ from pathlib import Path
 
 import torch
 
-from ..messages import Message
+from ..messages import Message, Role
 from .chat import CHAT_SPECIAL_TOKENS, format_conversation, supervised_segments
 from .instruct_data import INSTRUCT_EXAMPLES, build_examples
 from .model import SwiftConfig, SwiftLM
@@ -172,6 +172,7 @@ def finetune(
     tokenizer_path: Path,
     out_dir: Path,
     config: FinetuneConfig | None = None,
+    drop_thinking: bool = True,
 ) -> dict[str, object]:
     """Run instruction tuning and write the new model. Returns a report."""
     config = config or FinetuneConfig()
@@ -196,7 +197,21 @@ def finetune(
     print(f"  starting from {base_checkpoint} ({model.num_parameters():,} parameters)")
 
     # -- data --------------------------------------------------------------
+    # Swift's spec sets supports_thinking=False, so at inference the prompt
+    # always stops at <|assistant|> and the model must answer immediately.
+    # Training on examples that put reasoning prose in exactly that position
+    # teaches it to emit the reasoning AS the answer: the v0.4.0 run replied
+    # to "Who is the president of Brazil?" with "Brazil is a fact I was not
+    # trained on, so I should l..." - the verbatim `think` string from its
+    # training example. Dropping the thinking blocks removes that
+    # train/inference mismatch; `--keep-thinking` restores them for a model
+    # that will actually run above DO.
     conversations = build_examples()
+    if drop_thinking:
+        for messages in conversations:
+            for message in messages:
+                if message.role is Role.ASSISTANT and message.thinking:
+                    message.thinking = None
     encoded: list[tuple[list[int], list[int]]] = []
     kept_conversations: list[list[Message]] = []
     dropped = 0
@@ -373,6 +388,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("checkpoints/swift-instruct"))
     parser.add_argument("--epochs", type=int, default=FinetuneConfig.epochs)
     parser.add_argument("--lr", type=float, default=FinetuneConfig.learning_rate)
+    parser.add_argument(
+        "--keep-thinking",
+        action="store_true",
+        help="keep <|think|> blocks in the training data; only useful for a model "
+             "that will actually run above DO (Swift does not - see finetune()).",
+    )
     parser.add_argument("--threads", type=int, default=None)
     args = parser.parse_args(argv)
 
@@ -388,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         args.tokenizer,
         args.out,
         FinetuneConfig(epochs=args.epochs, learning_rate=args.lr),
+        drop_thinking=not args.keep_thinking,
     )
 
     # Show what it actually does now, rather than asserting that it works.
