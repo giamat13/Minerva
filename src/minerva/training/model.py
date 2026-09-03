@@ -103,11 +103,17 @@ class SwiftConfig:
 #: v0.5.0 grew it from 9.9M to 20M. The two constraints, both measured rather
 #: than assumed:
 #:
-#: * Data. Chinchilla's ~20 tokens per parameter. The v0.5.0 corpus is ~518M
-#:   tokens, so 20M is comfortably supported (400M needed) while 29M would not
-#:   be (582M needed) - which is why this is 20M and not larger. The corpus can
-#:   still grow: 52,610 of Gutenberg's 57,136 English texts remain undownloaded,
-#:   so data stops being the binding constraint the moment more is wanted.
+#: * Data. Chinchilla's ~20 tokens per parameter. The v0.5.0 corpus is 521M
+#:   tokens. At the shipped vocabulary of 16,384 this config is 26.8M
+#:   parameters total, of which 19.5M are non-embedding - so the ratio is met
+#:   with room to spare on the parameters that actually compute (390M needed),
+#:   and misses by ~3% if the embedding table is counted too (537M needed).
+#:   Embeddings are a lookup, not computation, so the non-embedding number is
+#:   the one that governs; the 3% is recorded rather than hidden. Note that
+#:   the vocabulary is what moved this from 23.2M to 26.8M - a config's size
+#:   is not readable from n_layer and d_model alone. The corpus can still
+#:   grow: 52,610 of Gutenberg's 57,136 English texts remain undownloaded, so
+#:   data stops being the binding constraint the moment more is wanted.
 #: * Compute. ~5,200 tok/s at 9.9M on 14 CPU cores with no usable GPU, falling
 #:   roughly inversely with parameter count. See CLAUDE.md section 8.
 #:

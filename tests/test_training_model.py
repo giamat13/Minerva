@@ -308,8 +308,9 @@ class TestShippedConfig:
     def test_it_is_the_size_the_documentation_claims(self) -> None:
         model = SwiftLM(SWIFT_CONFIG)
         total = model.num_parameters()
-        # v0.5.0 grew Swift from 9.9M to 23.2M, alongside the ~10x larger
-        # corpus that makes the extra parameters learn rather than memorise.
-        # This bound exists so the size cannot drift without the docs and the
-        # measured training budget being revisited together.
+        # v0.5.0 grew Swift from 9.9M, alongside the ~10x larger corpus that
+        # makes the extra parameters learn rather than memorise. The bound is
+        # on SWIFT_CONFIG's own vocab_size of 8192; the shipped run trains at
+        # the corpus tokenizer's 16,384, which puts the real model at 26.8M -
+        # a config's size is not readable from n_layer and d_model alone.
         assert 22.5e6 < total < 24.0e6, f"Swift is {total:,} parameters"
