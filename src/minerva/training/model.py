@@ -41,7 +41,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["SWIFT_CONFIG", "SwiftConfig", "SwiftLM"]
+__all__ = ["ARCHITECTURES", "SAGE_CONFIG", "SWIFT_CONFIG", "SwiftConfig", "SwiftLM"]
 
 
 @dataclass(frozen=True)
@@ -97,9 +97,10 @@ class SwiftConfig:
         return cls(**{k: v for k, v in data.items() if k in fields})  # type: ignore[arg-type]
 
 
-#: Swift's shipped architecture. Sized for the compute this project actually
-#: has: ~7M non-embedding-heavy parameters trained on ~6.3M tokens for a few
-#: epochs is close to compute-optimal on a 4-core CPU. See docs/TRAINING.md.
+#: Swift's shipped architecture. 9.9M parameters - deliberately tiny, and
+#: honest about it: it continues text well and holds only the shortest
+#: conversation. Kept exactly as trained so the shipped `swift` checkpoint
+#: stays reproducible; a bigger model is a new entry below, never an edit here.
 SWIFT_CONFIG = SwiftConfig(
     vocab_size=8192,
     n_layer=6,
@@ -107,6 +108,28 @@ SWIFT_CONFIG = SwiftConfig(
     d_model=320,
     max_seq_len=512,
 )
+
+#: Sage: the second Minerva architecture, sized to the requirement rather than
+#: to a habit. Swift's 9.9M is Chinchilla-correct for the 164M-token corpus it
+#: was trained on, so the only way past its ceiling was more data *and* more
+#: parameters together - hence the `gutenberg_bulk` source in data.py.
+#:
+#: 29M is not a preference, it is the measurement: this machine has 14 cores
+#: and no usable GPU, ~5,200 tok/s at 9.9M scaling roughly inversely with
+#: parameters, which puts 29M at about three days and 91M at about a month.
+#: See CLAUDE.md section 8. Larger is better and larger is available; what is
+#: not available here is the GPU that would make it finish this week.
+SAGE_CONFIG = SwiftConfig(
+    vocab_size=8192,
+    n_layer=8,
+    n_head=8,
+    d_model=512,
+    max_seq_len=512,
+)
+
+#: Architectures a training run can select with `--arch`. Add a size by adding
+#: a named config here; never by editing one that has shipped weights.
+ARCHITECTURES: dict[str, SwiftConfig] = {"swift": SWIFT_CONFIG, "sage": SAGE_CONFIG}
 
 
 class RMSNorm(nn.Module):

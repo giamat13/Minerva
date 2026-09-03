@@ -26,7 +26,7 @@ import numpy as np
 import torch
 
 from .dataset import TokenDataset
-from .model import SWIFT_CONFIG, SwiftConfig, SwiftLM
+from .model import ARCHITECTURES, SwiftConfig, SwiftLM
 from .tokenizer import BPETokenizer
 
 __all__ = ["TrainConfig", "Trainer"]
@@ -406,6 +406,12 @@ def main(argv: list[str] | None = None) -> int:
         default=TrainConfig.checkpoint_interval,
         help="save 'last' every N steps - lower this on flaky hardware to bound lost work",
     )
+    parser.add_argument(
+        "--arch",
+        choices=sorted(ARCHITECTURES),
+        default="swift",
+        help="named architecture from training/model.py (default: swift)",
+    )
     args = parser.parse_args(argv)
 
     if args.threads:
@@ -416,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
 
     model_config = SwiftConfig(
         **{
-            **SWIFT_CONFIG.to_dict(),
+            **ARCHITECTURES[args.arch].to_dict(),
             "vocab_size": tokenizer.vocab_size,
             "max_seq_len": args.seq_len,
         }
@@ -436,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
     train_data = TokenDataset(args.data / "train.bin", args.seq_len)
     val_data = TokenDataset(args.data / "val.bin", args.seq_len)
 
-    print("Pretraining Minerva Swift from scratch")
+    print(f"Pretraining Minerva ({args.arch}) from scratch")
     print(f"  device       {device}  ({platform.processor() or platform.machine()})")
     print(f"  threads      {torch.get_num_threads()}")
     print(f"  parameters   {model.num_parameters():,} "

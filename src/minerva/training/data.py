@@ -172,6 +172,31 @@ SOURCES: tuple[CorpusSource, ...] = (
         kind="gutenberg_ids",
     ),
     CorpusSource(
+        name="gutenberg_bulk",
+        url="https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt",
+        patterns=(),  # whatever scripts/fetch_gutenberg_books.py placed on disk
+        licence="Public domain (Project Gutenberg licence stripped with the header)",
+        origin=(
+            "Project Gutenberg, selected from Gutenberg's own published "
+            "catalogue (Type == Text, Language in {en, he}, periodical and "
+            "index material excluded) by scripts/fetch_gutenberg_catalogue.py "
+            "and downloaded by scripts/fetch_gutenberg_books.py"
+        ),
+        description=(
+            "The bulk of the corpus. The 119 hand-picked titles in "
+            "`gutenberg_extended` above chose register diversity by hand; this "
+            "source adds volume, because a model large enough to hold a real "
+            "conversation needs roughly twenty tokens per parameter and the "
+            "hand-picked set cannot supply them. The selection is still a "
+            "stated category decision rather than a row count: Gutenberg's own "
+            "metadata, not a generator. Books under 30 KB are skipped at "
+            "download time (stubs and contents pages), and ids already in "
+            "`gutenberg_extended` are skipped here so nothing is duplicated."
+        ),
+        cleaner="gutenberg_extended",
+        kind="gutenberg_bulk",
+    ),
+    CorpusSource(
         name="brown",
         url=f"{_NLTK_BASE}/brown.zip",
         patterns=("brown/????",),
@@ -579,6 +604,30 @@ def _iter_gutenberg_extended_texts(source: CorpusSource, cache_dir: Path) -> Ite
         yield target.read_text(encoding="utf-8", errors="replace")
 
 
+def _iter_gutenberg_bulk_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
+    """Read the bulk book set fetched by ``scripts/fetch_gutenberg_books.py``.
+
+    Deliberately does *not* download: at this volume the fetch is a long,
+    polite, resumable job that belongs in its own script, and a corpus build
+    that silently started a multi-hour download would be a bad surprise. An
+    empty directory is a loud error rather than a silently smaller corpus.
+    """
+    books_dir = cache_dir / "gutenberg_bulk"
+    paths = sorted(books_dir.glob("*.txt")) if books_dir.is_dir() else []
+    if not paths:
+        raise RuntimeError(
+            f"no books found in {books_dir}. Fetch them first with "
+            f"'python scripts/fetch_gutenberg_books.py --target-gb 1.7' "
+            f"(and, if data/cache/gutenberg_ids.json is missing, run "
+            f"'python scripts/fetch_gutenberg_catalogue.py' before it)."
+        )
+    already = {f"pg{gid}.txt" for gid in _GUTENBERG_EXTENDED_IDS}
+    for path in paths:
+        if path.name in already:
+            continue
+        yield path.read_text(encoding="utf-8", errors="replace")
+
+
 def _iter_benyehuda_texts(source: CorpusSource, cache_dir: Path) -> Iterator[str]:
     """Curate Project Ben-Yehuda's library down to seven authors' own work.
 
@@ -841,6 +890,8 @@ def build_corpus(
         raw_texts: Iterator[str]
         if source.kind == "gutenberg_ids":
             raw_texts = _iter_gutenberg_extended_texts(source, cache_dir)
+        elif source.kind == "gutenberg_bulk":
+            raw_texts = _iter_gutenberg_bulk_texts(source, cache_dir)
         elif source.kind == "benyehuda":
             raw_texts = _iter_benyehuda_texts(source, cache_dir)
         else:

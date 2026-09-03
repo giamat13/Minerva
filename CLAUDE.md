@@ -325,7 +325,56 @@ ruff check . && mypy          # both must be clean before committing
 
 ---
 
-## 8. Running training: start both, keep whichever is faster
+## 8. Model size: no arbitrary cap, sized to the requirement
+
+**There is no fixed parameter budget.** Swift being 9.9M is not a rule, it is
+what its corpus supported at the time. Size the model to the job — a model
+that has to hold a sensible, quick conversation gets whatever it needs to do
+that — and let the two real constraints decide the number, not habit:
+
+1. **Data.** Chinchilla's ~20 tokens per parameter. Below that the extra
+   parameters memorise instead of generalising, which is the "shop + random
+   adjective" failure in §1 wearing a bigger coat. **This is no longer the
+   binding constraint**: Project Gutenberg's own catalogue lists 57,136
+   English texts, so the corpus can grow by orders of magnitude on demand.
+2. **Compute.** This is now what binds, and it must be *measured on the
+   machine in hand* before a size is chosen, never assumed.
+
+### The hardware, measured
+
+| | value |
+|---|---|
+| local cores | **14 logical** (an earlier version of this file said 4 - that was wrong) |
+| local GPU | **none usable** - Intel integrated only, and torch is a CPU build |
+| measured throughput | ~5,200 tok/s at 9.9M params, seq 512 |
+| hosted runner | 2 cores, ~1,790 tok/s - slower than local, so it never rescues a long run |
+
+Throughput falls roughly with parameter count, so the training cost of a
+size is knowable in advance and should be worked out before committing:
+
+| params | tokens for Chinchilla | CPU training time here |
+|---|---|---|
+| 9.9M | 198M | 0.4 days |
+| 29M | 582M | ~3 days |
+| 91M | 1.8B | ~27 days |
+| 211M | 4.2B | ~127 days |
+
+### The honest ceiling
+
+On **CPU only**, roughly 29M is the largest size that trains in days rather
+than weeks, and it is a real 3x rather than a token gesture. Above that the
+arithmetic stops being about willingness and starts being about months of
+wall clock. **A CUDA GPU is the actual unlock** - it moves a 91M-200M model
+from months to hours - and if the goal is a model that genuinely converses,
+say so plainly rather than quietly training something too small and
+reporting the metrics as if the target had been met.
+
+Never present a size limit as a preference. State the measurement, state
+what it costs, and let the person decide.
+
+---
+
+## 9. Running training: start both, keep whichever is faster
 
 A real training run goes to **both** places at once — this machine and the
 GitHub Actions workflow (`.github/workflows/train.yml`) — and whichever gets
@@ -334,12 +383,12 @@ answer is measured per run rather than assumed:
 
 | | local | hosted runner |
 |---|---|---|
-| cores | 4 | 2 |
-| measured throughput (9.9M, seq 512) | ~3,100 tok/s | ~1,400–1,600 tok/s |
+| cores | 14 logical | 2 |
+| measured throughput (9.9M, seq 512) | ~5,200 tok/s | ~1,790 tok/s |
 | job limit | none | 6 h hard, so the run must resume across jobs |
 | costs the user's machine | yes | no |
 
-Local is usually about twice as fast per token, and the runner is usually
+Local is roughly three times as fast per token, and the runner is usually
 better at grinding through a long budget unattended. Start both, watch the
 step counters, and take the checkpoint that is further along.
 
@@ -425,6 +474,8 @@ Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טק�
 `supports_thinking`) ובתיעוד. אסור לפרסם יכולת שהמשקולות לא באמת מספקות ולתת
 לקוד לכסות על זה. כשמתגלה באג — כותבים אותו, את ההשפעה המדודה ואת ההחלטה
 שהתקבלה, ולא מתקנים בשקט.
+
+**אין תקרת פרמטרים שרירותית.** גודל המודל נגזר מהמשימה, לא מהרגל. שני אילוצים אמיתיים קובעים: דאטה (בערך 20 טוקנים לפרמטר — וזה כבר לא הצוואר, בקטלוג של גוטנברג יש 57,136 טקסטים באנגלית) ומחשוב, שנמדד על המכונה שבפועל ולא מנוחש. במכונה הזו: 14 ליבות, **אין GPU** (אינטל משולב, torch בגרסת CPU), כ-5,200 טוקנים לשנייה ב-9.9M. לכן על CPU בלבד ~29M הוא הגודל הגדול ביותר שמתאמן בימים ולא בשבועות; 91M הוא כחודש ו-211M כארבעה חודשים. **GPU הוא הפתרון האמיתי** אם המטרה היא מודל שבאמת משוחח. אסור להציג מגבלת גודל כהעדפה — מציגים את המדידה, את המחיר, ונותנים למשתמש להחליט.
 
 **מריצים אימון בשני המקומות, ולוקחים את המהיר.**
 כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions, ומי
