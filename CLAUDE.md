@@ -217,7 +217,7 @@ runs.
 - ✅ If a task turns out to be bigger than expected, **do the whole thing or
   report exactly what is missing**. Never quietly deliver a narrower version
   and describe it as complete.
-- ✅ **Report what a model actually is.** Swift is a 9.9M-parameter base model:
+- ✅ **Report what a model actually is.** Swift is a 23.2M-parameter base model:
   it continues text, it cannot call tools, it has no reasoning phase. The
   engine declares those limits in `capabilities`, the model spec declares them
   in `supports_tools` / `supports_thinking`, and the README states them in
@@ -327,10 +327,24 @@ ruff check . && mypy          # both must be clean before committing
 
 ## 8. Model size: no arbitrary cap, sized to the requirement
 
-**There is no fixed parameter budget.** Swift being 9.9M is not a rule, it is
-what its corpus supported at the time. Size the model to the job — a model
-that has to hold a sensible, quick conversation gets whatever it needs to do
-that — and let the two real constraints decide the number, not habit:
+**There is no fixed parameter budget, and there is exactly one model.**
+Swift's size is not a rule, it is what its corpus and this machine support:
+9.9M in v0.3.0 on a 164M-token corpus, 23.2M in v0.5.0 on a 518M-token one.
+Size the model to the job - a model that has to hold a sensible, quick
+conversation gets whatever it needs - and let the two real constraints decide
+the number, not habit:
+
+**One model at a time.** Minerva is built to become a family, and it will get
+stronger models later - but a named architecture with no trained weights is a
+promise, not a model, and this file forbids claiming capability that the
+weights do not have. So growing Swift means *changing Swift's config*, not
+adding a second entry beside it that nobody has trained. When a genuinely
+stronger model is actually going to be trained (a GPU appears, or a longer
+budget), add it then, as its own config plus a `--arch` flag, so the shipped
+checkpoint never stops matching the code that describes it. Until then, one
+config, one checkpoint directory per architecture, and a new directory
+whenever the shape changes - resuming a 23M run from 9.9M weights either
+fails or silently trains the wrong thing.
 
 1. **Data.** Chinchilla's ~20 tokens per parameter. Below that the extra
    parameters memorise instead of generalising, which is the "shop + random
@@ -352,22 +366,38 @@ that — and let the two real constraints decide the number, not habit:
 Throughput falls roughly with parameter count, so the training cost of a
 size is knowable in advance and should be worked out before committing:
 
-| params | tokens for Chinchilla | CPU training time here |
+| params | tokens for Chinchilla | one pass, 518M-token corpus |
 |---|---|---|
-| 9.9M | 198M | 0.4 days |
-| 29M | 582M | ~3 days |
-| 91M | 1.8B | ~27 days |
-| 211M | 4.2B | ~127 days |
+| 9.9M | 198M | ~28 h local / ~80 h CI |
+| 23.2M (v0.5.0) | 464M | ~57 h local / ~188 h CI |
+| 91M | 1.8B | weeks |
+| 211M | 4.2B | months |
+
+Two measurements that decide how a run is scheduled, both taken on this
+machine at 23.2M, batch 4 x seq 512:
+
+* **14 threads gives ~2,520 tok/s; 10 threads gives ~2,365** - about 6%. The
+  14 "cores" are 7 physical with hyperthreading, so the last four buy very
+  little. Leaving them for the desktop is nearly free, and a machine that
+  stays usable while it trains is worth 6%.
+* **CI is ~3x slower than local**, not faster (2 cores against 14). At 23.2M a
+  full pass is 31 sequential 6-hour jobs, which is not a plan. CI is a free
+  parallel *sample* of the same config, not the primary run - see section 9.
 
 ### The honest ceiling
 
-On **CPU only**, roughly 29M is the largest size that trains in days rather
-than weeks, and it is a real 3x rather than a token gesture. Above that the
-arithmetic stops being about willingness and starts being about months of
-wall clock. **A CUDA GPU is the actual unlock** - it moves a 91M-200M model
-from months to hours - and if the goal is a model that genuinely converses,
-say so plainly rather than quietly training something too small and
-reporting the metrics as if the target had been met.
+On **CPU only**, the mid-20M range is the largest size that trains in days
+rather than weeks. v0.5.0 sits at 23.2M for a reason that is arithmetic, not
+taste: the 518M-token corpus supports 23M under Chinchilla (464M needed) and
+does not support 29M (582M needed). More data is available on demand - 52,610
+of Gutenberg's 57,136 English texts are still undownloaded - but every book
+added lengthens the run, so data and compute have to be chosen together.
+
+Above that range the arithmetic stops being about willingness and starts
+being about months of wall clock. **A CUDA GPU is the actual unlock** - it
+moves a 91M-200M model from months to hours - and if the goal is a model that
+genuinely converses, say so plainly rather than quietly training something too
+small and reporting the metrics as if the target had been met.
 
 Never present a size limit as a preference. State the measurement, state
 what it costs, and let the person decide.
@@ -469,13 +499,21 @@ Rules that keep the two from corrupting each other:
 הוספות ובלי פרמטרים ספציפיים למנוע.
 
 **דיווח כן על מה שהמודל באמת יודע.**
-Swift הוא מודל בסיס בן 9.9M פרמטרים: הוא ממשיך טקסט, לא מפעיל כלים ואין לו שלב
+Swift הוא מודל בסיס בן 23.2M פרמטרים: הוא ממשיך טקסט, לא מפעיל כלים ואין לו שלב
 חשיבה. המגבלות האלה מוצהרות בקוד (`capabilities`, `supports_tools`,
 `supports_thinking`) ובתיעוד. אסור לפרסם יכולת שהמשקולות לא באמת מספקות ולתת
 לקוד לכסות על זה. כשמתגלה באג — כותבים אותו, את ההשפעה המדודה ואת ההחלטה
 שהתקבלה, ולא מתקנים בשקט.
 
-**אין תקרת פרמטרים שרירותית.** גודל המודל נגזר מהמשימה, לא מהרגל. שני אילוצים אמיתיים קובעים: דאטה (בערך 20 טוקנים לפרמטר — וזה כבר לא הצוואר, בקטלוג של גוטנברג יש 57,136 טקסטים באנגלית) ומחשוב, שנמדד על המכונה שבפועל ולא מנוחש. במכונה הזו: 14 ליבות, **אין GPU** (אינטל משולב, torch בגרסת CPU), כ-5,200 טוקנים לשנייה ב-9.9M. לכן על CPU בלבד ~29M הוא הגודל הגדול ביותר שמתאמן בימים ולא בשבועות; 91M הוא כחודש ו-211M כארבעה חודשים. **GPU הוא הפתרון האמיתי** אם המטרה היא מודל שבאמת משוחח. אסור להציג מגבלת גודל כהעדפה — מציגים את המדידה, את המחיר, ונותנים למשתמש להחליט.
+**מודל אחד בכל רגע נתון.** Minerva בנויה להיות משפחה, ויהיו מודלים חזקים
+יותר בהמשך — אבל ארכיטקטורה עם שם ובלי משקולות מאומנות היא הבטחה, לא מודל,
+והקובץ הזה אוסר להציג יכולת שאין למשקולות. לכן הגדלה של Swift נעשית **בשינוי
+הקונפיג של Swift**, ולא בהוספת רשומה שנייה לידו שאף אחד לא אימן. כשבאמת הולכים
+לאמן מודל חזק יותר (יש GPU, או תקציב זמן ארוך) — מוסיפים אותו אז, עם קונפיג
+משלו ודגל `--arch`. עד אז: קונפיג אחד, ותיקיית checkpoint חדשה בכל שינוי צורה —
+להמשיך ריצה של 23M ממשקולות של 9.9M או ייכשל או יאמן בשקט את הדבר הלא נכון.
+
+**אין תקרת פרמטרים שרירותית.** גודל המודל נגזר מהמשימה, לא מהרגל. שני אילוצים אמיתיים קובעים: דאטה (בערך 20 טוקנים לפרמטר — וזה כבר לא הצוואר, בקטלוג של גוטנברג יש 57,136 טקסטים באנגלית) ומחשוב, שנמדד על המכונה שבפועל ולא מנוחש. במכונה הזו: 14 ליבות, **אין GPU** (אינטל משולב, torch בגרסת CPU), כ-2,520 טוקנים לשנייה ב-23.2M. לכן על CPU בלבד טווח ה-20M הוא הגודל הגדול ביותר שמתאמן בימים ולא בשבועות. v0.5.0 עומד על 23.2M כי זה מה שהקורפוס מחזיק: 518M טוקנים תומכים ב-23M (צריך 464M) ולא ב-29M (צריך 582M). ועוד מדידה שקובעת איך מתזמנים ריצה: 10 threads נותן 94% מהמהירות של 14 — כלומר להשאיר ארבע ליבות פנויות למשתמש עולה כ-6% בלבד. **GPU הוא הפתרון האמיתי** אם המטרה היא מודל שבאמת משוחח. אסור להציג מגבלת גודל כהעדפה — מציגים את המדידה, את המחיר, ונותנים למשתמש להחליט.
 
 **מריצים אימון בשני המקומות, ולוקחים את המהיר.**
 כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions, ומי

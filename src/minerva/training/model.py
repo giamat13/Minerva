@@ -41,7 +41,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["ARCHITECTURES", "SAGE_CONFIG", "SWIFT_CONFIG", "SwiftConfig", "SwiftLM"]
+__all__ = ["SWIFT_CONFIG", "SwiftConfig", "SwiftLM"]
 
 
 @dataclass(frozen=True)
@@ -97,39 +97,32 @@ class SwiftConfig:
         return cls(**{k: v for k, v in data.items() if k in fields})  # type: ignore[arg-type]
 
 
-#: Swift's shipped architecture. 9.9M parameters - deliberately tiny, and
-#: honest about it: it continues text well and holds only the shortest
-#: conversation. Kept exactly as trained so the shipped `swift` checkpoint
-#: stays reproducible; a bigger model is a new entry below, never an edit here.
-SWIFT_CONFIG = SwiftConfig(
-    vocab_size=8192,
-    n_layer=6,
-    n_head=8,
-    d_model=320,
-    max_seq_len=512,
-)
-
-#: Sage: the second Minerva architecture, sized to the requirement rather than
-#: to a habit. Swift's 9.9M is Chinchilla-correct for the 164M-token corpus it
-#: was trained on, so the only way past its ceiling was more data *and* more
-#: parameters together - hence the `gutenberg_bulk` source in data.py.
+#: Swift's architecture. One model, sized to what the corpus and this machine
+#: actually support - not to a habit, and not to an aspiration.
 #:
-#: 29M is not a preference, it is the measurement: this machine has 14 cores
-#: and no usable GPU, ~5,200 tok/s at 9.9M scaling roughly inversely with
-#: parameters, which puts 29M at about three days and 91M at about a month.
-#: See CLAUDE.md section 8. Larger is better and larger is available; what is
-#: not available here is the GPU that would make it finish this week.
-SAGE_CONFIG = SwiftConfig(
+#: v0.5.0 grew it from 9.9M to 20M. The two constraints, both measured rather
+#: than assumed:
+#:
+#: * Data. Chinchilla's ~20 tokens per parameter. The v0.5.0 corpus is ~518M
+#:   tokens, so 20M is comfortably supported (400M needed) while 29M would not
+#:   be (582M needed) - which is why this is 20M and not larger. The corpus can
+#:   still grow: 52,610 of Gutenberg's 57,136 English texts remain undownloaded,
+#:   so data stops being the binding constraint the moment more is wanted.
+#: * Compute. ~5,200 tok/s at 9.9M on 14 CPU cores with no usable GPU, falling
+#:   roughly inversely with parameter count. See CLAUDE.md section 8.
+#:
+#: Bigger models are a real possibility, not a closed door - but they are a
+#: *later* decision, taken with a GPU or a longer budget in hand rather than
+#: declared here in advance. When that day comes, add a second named config and
+#: a `--arch` flag rather than editing this one, so a shipped checkpoint never
+#: stops matching the code that describes it.
+SWIFT_CONFIG = SwiftConfig(
     vocab_size=8192,
     n_layer=8,
     n_head=8,
-    d_model=512,
+    d_model=448,
     max_seq_len=512,
 )
-
-#: Architectures a training run can select with `--arch`. Add a size by adding
-#: a named config here; never by editing one that has shipped weights.
-ARCHITECTURES: dict[str, SwiftConfig] = {"swift": SWIFT_CONFIG, "sage": SAGE_CONFIG}
 
 
 class RMSNorm(nn.Module):
