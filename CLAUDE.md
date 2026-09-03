@@ -73,11 +73,27 @@ hit a row count, and that what is there is real.
   few fixed phrases and confabulate on anything else — the same failure this
   rule exists to prevent, in a new language instead of a new fact.
 
-### Algorithmic examples: sentence *structure* only, never vocabulary
+### Algorithmic examples: generate *training data*, never runtime replies
 
-Generated examples are allowed for exactly one purpose — teaching the model
-how a sentence is **put together** — and are forbidden for teaching it *what
-to put in one*.
+First, the distinction that matters most, because getting it wrong turns the
+model into a puppet:
+
+- ✅ **What "algorithm" means here:** code that *generates training examples*,
+  which are then used to really train the weights. The model learns from
+  them and afterwards stands on its own. The generator is build-time only and
+  never ships in the inference path.
+- ❌ **What it never means:** code that looks at an incoming message at
+  runtime and decides what to answer. No keyword matching, no "if the message
+  is a greeting, reply with a greeting", no regex dispatch, no canned reply
+  table, no post-processing that repairs the model's output. That is not a
+  model answering, it is a lookup table wearing a model's name, and §2
+  already forbids it as a fake response. **If a metric in this file improves
+  because of something in the request path rather than in the weights, the
+  improvement is fake and the metric is now lying.**
+
+With that settled: generated examples are allowed for exactly one purpose —
+teaching the model how a sentence is **put together** — and are forbidden for
+teaching it *what to put in one*.
 
 The failure this rule exists to prevent is a real one from an earlier attempt
 at building a model here: it was trained entirely on algorithmic data, so
@@ -354,7 +370,16 @@ Rules that keep the two from corrupting each other:
 מסוימת נמצאת בדאטהסט — היא לא צריכה להיות שם. אותו כלל חל גם על סטים של הערכה
 (eval).
 
-**אלגוריתמים — רק למבנה משפט, אף פעם לא לאוצר מילים.**
+**אלגוריתם = ייצור דאטה לאימון, לא זיהוי הודעות בזמן ריצה.**
+"אלגוריתם" כאן פירושו קוד שמייצר *דוגמאות אימון*, שבהן מאמנים באמת את
+המשקולות — והמודל אחר כך עומד בזכות עצמו. המחולל רץ רק בזמן בנייה ולעולם לא
+בנתיב ההסקה. **אסור** קוד שמסתכל על ההודעה הנכנסת בזמן ריצה ומחליט מה לענות:
+בלי התאמת מילות מפתח, בלי "אם זו ברכה תחזיר ברכה", בלי טבלת תשובות מוכנות
+ובלי תיקון של הפלט אחרי המודל. זה לא מודל שעונה, זו טבלה שמתחזה למודל. אם
+מדד בקובץ הזה משתפר בגלל משהו בנתיב הבקשה ולא במשקולות — השיפור מזויף והמדד
+משקר.
+
+**ובנוסף: רק למבנה משפט, אף פעם לא לאוצר מילים.**
 מותר לייצר דוגמאות אלגוריתמית למטרה אחת בלבד: ללמד איך *בונים* משפט — סדר
 הפסוקיות, שאלה מול קביעה, זמן, התאמה, איך תשובה נקשרת לשאלה. **אסור** לייצר
 דוגמאות שממלאות תוכן מתוך רשימה סגורה (שמות עצם, שמות תואר, מקומות, מספרים):

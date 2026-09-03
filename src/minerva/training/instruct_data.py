@@ -1330,6 +1330,62 @@ _TALK_NATURALLY: tuple[InstructExample, ...] = (
 #    keeps the ratio where it was rather than spending that slack.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 8e. Bare openers - the shortest thing a real person types.
+#
+#    Found by hand-testing the served model rather than by reading the file.
+#    "Hi" and "Thanks!" came back EMPTY, "שלום" came back as
+#    "שלום.שלום.שלום.שלום..." and "מה שלומך?" as "השם שלי הוא שלומך."
+#    The cause was in the data: of 323 examples only five had a one-word
+#    prompt, and every greeting that existed was punctuated - "Hello.",
+#    "שלום." - while a real person types "Hi" or "hey" with no full stop and
+#    no capital. A one-token prompt also carries almost no context to
+#    condition on, so whatever the model has seen for that exact shape is
+#    most of what it has to go on.
+#
+#    Written out one at a time, not permuted from a greeting list: per
+#    CLAUDE.md, generated content would teach a closed set of openers, which
+#    is precisely the failure mode being fixed here. The variation that
+#    matters is real - punctuation, capitalisation, register, and the fact
+#    that some of these are goodbyes rather than greetings.
+# ---------------------------------------------------------------------------
+
+_BARE_OPENERS: tuple[InstructExample, ...] = (
+    InstructExample(user="Hi", answer="Hi. What can I do for you?"),
+    InstructExample(user="hi", answer="Hi there. How can I help?"),
+    InstructExample(user="Hey", answer="Hey. What do you need?"),
+    InstructExample(user="hey", answer="Hey. What can I help with?"),
+    InstructExample(user="Yo", answer="Hello. What can I do for you?"),
+    InstructExample(user="Hello", answer="Hello. How can I help?"),
+    InstructExample(user="Thanks", answer="You are welcome."),
+    InstructExample(user="Thanks!", answer="You are welcome. Anything else?"),
+    InstructExample(user="thanks", answer="Any time."),
+    InstructExample(user="Cheers", answer="You are welcome."),
+    InstructExample(user="Bye", answer="Goodbye."),
+    InstructExample(user="bye", answer="Bye. Take care."),
+    InstructExample(user="Morning", answer="Good morning. What can I help with?"),
+    InstructExample(user="Evening", answer="Good evening."),
+    InstructExample(user="Sorry", answer="No need to apologise. What is on your mind?"),
+    InstructExample(user="Okay", answer="All right. What next?"),
+    InstructExample(user="Please", answer="Of course. What would you like?"),
+    InstructExample(user="Help", answer="Certainly. What do you need help with?"),
+    InstructExample(user="שלום", answer="שלום. איך אפשר לעזור?"),
+    InstructExample(user="היי", answer="היי. מה אפשר לעשות בשבילך?"),
+    InstructExample(user="הי", answer="היי. במה אפשר לעזור?"),
+    InstructExample(user="אהלן", answer="אהלן. מה נשמע?"),
+    InstructExample(user="תודה", answer="בבקשה."),
+    InstructExample(user="תודה!", answer="בבקשה. עוד משהו?"),
+    InstructExample(user="ביי", answer="ביי. יום טוב."),
+    InstructExample(user="להתראות", answer="להתראות."),
+    InstructExample(user="בוקר טוב", answer="בוקר טוב. איך אפשר לעזור?"),
+    InstructExample(user="ערב טוב", answer="ערב טוב."),
+    InstructExample(user="לילה טוב", answer="לילה טוב."),
+    InstructExample(user="סליחה", answer="אין על מה. מה רצית?"),
+    InstructExample(user="אוקיי", answer="בסדר גמור. מה הלאה?"),
+    InstructExample(user="עזרה", answer="בוודאי. במה אפשר לעזור?"),
+)
+
+
 _FLUENT_NO_TOOL: tuple[InstructExample, ...] = (
     # -- English: reacting, following up, keeping a thread ------------------
     InstructExample(
@@ -2046,6 +2102,7 @@ INSTRUCT_EXAMPLES: tuple[InstructExample, ...] = (
     *_REBALANCE,
     *_MULTI_TURN,
     *_TALK_NATURALLY,
+    *_BARE_OPENERS,
     *_FLUENT_NO_TOOL,
     *_FLUENT_TOOL_USE,
     *_WHAT_IS_IT,

@@ -160,18 +160,18 @@ EVAL_CASES: tuple[EvalCase, ...] = (
     #    real user opens with "Hi" or "שלום" and judges the model on that.
     #    Under served conditions those scored roughly 40%, against a headline
     #    relevance of 75% - the gap was the eval's, not the model's.
-    EvalCase("Hi", None, relevant_if=("hi", "hello", "hey", "help")),
-    EvalCase("Hey there", None, relevant_if=("hi", "hello", "hey", "help")),
-    EvalCase("Thanks!", None,
+    EvalCase("Howdy", None, relevant_if=("hi", "hello", "hey", "help", "howdy")),
+    EvalCase("Hiya", None, relevant_if=("hi", "hello", "hey", "help")),
+    EvalCase("Appreciate it", None,
              relevant_if=("welcome", "glad", "pleasure", "happy", "any time", "sure")),
     EvalCase("Could you give me a hand?", None,
              relevant_if=("yes", "sure", "help", "what", "can", "hand")),
     EvalCase("So what exactly are you?", None,
              relevant_if=("swift", "model", "minerva")),
-    EvalCase("שלום", None, relevant_if=("שלום", "היי", "עזור", "אפשר")),
-    EvalCase("היי", None, relevant_if=("שלום", "היי", "עזור", "אפשר")),
-    EvalCase("בוקר טוב", None, relevant_if=("בוקר", "טוב", "שלום")),
-    EvalCase("תודה", None, relevant_if=("בבקשה", "בשמחה", "שמח", "אין בעד מה")),
+    EvalCase("שלום לך", None, relevant_if=("שלום", "היי", "עזור", "אפשר")),
+    EvalCase("מה נשמע?", None, relevant_if=("בסדר", "טוב", "שלום", "מה")),
+    EvalCase("יום טוב", None, relevant_if=("יום", "טוב", "שלום")),
+    EvalCase("רב תודות", None, relevant_if=("בבקשה", "בשמחה", "שמח", "אין בעד מה")),
     EvalCase("מה אתה בעצם?", None, relevant_if=("swift", "מודל", "פרמטרים")),
 )
 
