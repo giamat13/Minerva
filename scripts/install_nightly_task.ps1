@@ -47,9 +47,23 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
 # means "any user logs on", which is a machine-wide change and needs an
 # elevated shell; scoped to one account it registers as a normal user, so this
 # script needs no administrator rights.
+#
+# The third trigger is a self-heal. The run is an ordinary process, so closing
+# its console window - or any other accidental kill - ends it silently, and
+# nobody would notice until the next morning's status check. Retrying every 30
+# minutes across the day means the worst case is half an hour lost rather than
+# a whole night. It is safe to fire while training is already running because
+# MultipleInstances IgnoreNew (below) refuses to start a second copy, and safe
+# to fire outside the window because train_nightly.py sleeps when it wakes
+# there.
+$repeating = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
+    -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration ([TimeSpan]::FromDays(3650))
+
 $triggers = @(
     (New-ScheduledTaskTrigger -Daily -At $StartTime),
-    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
+    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"),
+    $repeating
 )
 
 # StopIfGoingOnBatteries stays off on purpose: on a desktop it is irrelevant,
