@@ -712,7 +712,15 @@ _PG_START = re.compile(r"\*\*\* ?START OF TH[EIS]+ PROJECT GUTENBERG EBOOK.*?\*\
 _PG_END = re.compile(r"\*\*\* ?END OF TH[EIS]+ PROJECT GUTENBERG EBOOK.*?\*\*\*", re.S)
 #: Transcriber's notes and produced-by credits sit inside the markers but are
 #: apparatus, not prose.
-_PG_PRODUCED_BY = re.compile(r"^\s*(Produced by|E-?text prepared by|Transcribed from).*$", re.M)
+# The production credit is a *paragraph*, not a line: "Produced by X, Y and
+# the Online Distributed / Proofreading Team" wraps freely, and matching only
+# the first line left a dangling "Proofreading Team" at the top of more than
+# half the bulk books. Matched up to the blank line that ends the paragraph.
+_PG_PRODUCED_BY = re.compile(
+    r"^[ \t]*(?:Produced by|E-?text prepared by|Transcribed from|"
+    r"Executive Director's Notes)\b.*?(?:\n[ \t]*\n|\Z)",
+    re.M | re.S,
+)
 
 
 def _strip_gutenberg_markers(text: str) -> str:
