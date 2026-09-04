@@ -212,10 +212,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data", default="data_v05")
     parser.add_argument("--out", default="checkpoints/swift-v05")
     parser.add_argument("--steps", type=int, default=63_232)
-    # 100, not the trainer's 500: a checkpoint costs 0.3s to write, so saving
-    # five times more often is 0.08% overhead and caps what an unexpected
-    # shutdown can destroy at ~5 minutes instead of ~27.
-    parser.add_argument("--checkpoint-interval", type=int, default=100)
+    # 50, not the trainer's 500. A checkpoint costs ~0.28s including the
+    # fsync, and a step takes ~4.8s, so saving ten times more often is ~0.12%
+    # overhead. That is what a *crash* costs - a clean shutdown costs almost
+    # nothing, because the trainer catches the shutdown event and saves.
+    parser.add_argument("--checkpoint-interval", type=int, default=50)
     parser.add_argument("--extra", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args(argv)
     args.start_t, args.end_t = parse_clock(args.start), parse_clock(args.end)
@@ -271,6 +272,46 @@ def main(argv: list[str] | None = None) -> int:
             return code
 
 
+def readable_checkpoint(path: Path) -> bool:
+    """Can this checkpoint actually be loaded?
+
+    Cheap insurance against the one failure the atomic-write-plus-fsync in
+    save_checkpoint is meant to prevent. If it ever does happen - a failing
+    disk, a filesystem that reordered the rename anyway - the run should fall
+    back to the older checkpoint rather than refuse to start and lose the
+    entire history.
+    """
+    try:
+        import torch
+
+        torch.load(path, map_location="cpu", weights_only=False)
+        return True
+    except Exception as exc:
+        print(f"  {path.name} will not load ({type(exc).__name__}); "
+              f"trying an older checkpoint", flush=True)
+        return False
+
+
+def pick_checkpoint(out: Path) -> Path | None:
+    """The newest checkpoint that actually loads, or None to start fresh.
+
+    `last.pt` before `best.pt`: best only moves when validation improves, so
+    its step lags real progress and resuming from it silently discards work.
+    A stale `.pt.tmp` is a half-written save from a crash and is removed - it
+    is never a resume candidate.
+    """
+    for stale in out.glob("*.pt.tmp"):
+        print(f"  removing half-written {stale.name} from an interrupted save",
+              flush=True)
+        stale.unlink(missing_ok=True)
+
+    for name in ("last.pt", "best.pt"):
+        candidate = out / name
+        if candidate.exists() and readable_checkpoint(candidate):
+            return candidate
+    return None
+
+
 def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int:
     """Train until the machine is wanted back, then stop the trainer cleanly.
 
@@ -290,12 +331,9 @@ def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int
         "--checkpoint-interval", str(args.checkpoint_interval),
         "--stop-file", str(stop_file),
     ]
-    # Resume from the rolling checkpoint. `last.pt`, not `best.pt`: best lags
-    # actual progress, since it only moves when validation improves, and
-    # resuming from it silently discards real steps.
-    last = Path(args.out) / "last.pt"
-    if last.exists():
-        command += ["--resume", str(last)]
+    resume = pick_checkpoint(Path(args.out))
+    if resume:
+        command += ["--resume", str(resume)]
     command += args.extra
 
     flags = 0

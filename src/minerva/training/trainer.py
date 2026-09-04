@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import platform
 import sys
 import time
@@ -30,6 +31,51 @@ from .model import SWIFT_CONFIG, SwiftConfig, SwiftLM
 from .tokenizer import BPETokenizer
 
 __all__ = ["TrainConfig", "Trainer"]
+
+#: Set when the operating system says it is shutting down, logging off, or
+#: closing this console. The training loop checks it and exits through the
+#: normal save path, so a machine being switched off costs the current step
+#: rather than everything since the last checkpoint.
+_SHUTDOWN_REQUESTED = False
+#: SetConsoleCtrlHandler does not keep its own reference to the callback, so
+#: letting Python collect it would leave the OS calling freed memory.
+_CTRL_HANDLER: Any = None
+
+
+def _install_shutdown_handler() -> None:
+    """Ask Windows to tell us before it kills this process.
+
+    Windows delivers CTRL_SHUTDOWN_EVENT / CTRL_LOGOFF_EVENT to console
+    processes and then waits a few seconds before terminating them - enough to
+    finish a step and write a checkpoint, which takes about 0.3s. Without this
+    an ordinary "shut down" discards every step since the last save.
+
+    Best-effort by design: on a non-Windows platform, or if the API is
+    unavailable, training simply runs as before rather than failing to start.
+    """
+    global _CTRL_HANDLER
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        # CTRL_C=0, CTRL_BREAK=1, CTRL_CLOSE=2, CTRL_LOGOFF=5, CTRL_SHUTDOWN=6
+        handler_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_ulong)
+
+        def _handler(event: int) -> bool:
+            global _SHUTDOWN_REQUESTED
+            if event in (0, 1, 2, 5, 6):
+                _SHUTDOWN_REQUESTED = True
+                # Returning True claims the event, so Python's own Ctrl+C
+                # KeyboardInterrupt does not also fire and unwind the loop
+                # before it can save.
+                return True
+            return False
+
+        _CTRL_HANDLER = handler_type(_handler)
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_CTRL_HANDLER, True)
+    except Exception:  # pragma: no cover - platform quirk, never fatal
+        _CTRL_HANDLER = None
 
 
 @dataclass
@@ -225,10 +271,22 @@ class Trainer:
             "val_loss": val_loss,
             "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        # Write to a temporary file and rename: a crash mid-write must never
-        # leave a corrupt checkpoint where a good one used to be.
+        # Write to a temporary file, force it to the physical disk, and only
+        # then rename over the old one. Each half matters for a different
+        # failure:
+        #
+        #  * The rename is atomic, so a crash mid-write leaves the previous
+        #    good checkpoint intact rather than a truncated one.
+        #  * The fsync is what makes that true after a *power cut* rather than
+        #    only after a process death. Without it torch.save leaves the data
+        #    in the OS cache, and the filesystem can commit the rename while
+        #    the contents are still unwritten - producing a last.pt that exists
+        #    and is garbage, which is the one outcome this must never allow.
         tmp = path.with_suffix(".pt.tmp")
-        torch.save(payload, tmp)
+        with tmp.open("wb") as handle:
+            torch.save(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
         tmp.replace(path)
         return path
 
@@ -287,6 +345,7 @@ class Trainer:
         cfg = self.config
         self.model.train()
         torch.manual_seed(cfg.seed)
+        _install_shutdown_handler()
 
         tokens_per_step = cfg.tokens_per_step()
         started = time.time()
@@ -406,6 +465,21 @@ class Trainer:
             if cfg.stop_file and Path(cfg.stop_file).exists():
                 print(f"\n  stop requested via {cfg.stop_file} at step {self.state.step}")
                 break
+
+            if _SHUTDOWN_REQUESTED:
+                print(f"\n  system is shutting down; saving at step {self.state.step}")
+                break
+
+        if _SHUTDOWN_REQUESTED:
+            # No validation pass here on purpose. Windows gives a few seconds
+            # between announcing the shutdown and killing the process; a full
+            # evaluation over the held-out set would spend them and get us
+            # killed before writing anything, which is strictly worse than the
+            # periodic checkpoint we already have. Saving takes ~0.3s, so this
+            # keeps the step, and the next run evaluates on resume.
+            self.save_checkpoint("last")
+            print(f"  saved at step {self.state.step} before shutdown")
+            return self.state
 
         val_loss = self.evaluate()
         if val_loss < self.state.best_val_loss:
