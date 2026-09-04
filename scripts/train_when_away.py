@@ -54,6 +54,10 @@ import urllib.request
 from datetime import datetime, timedelta
 from datetime import time as clock_time
 from pathlib import Path
+from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from free_memory import free_memory
 
 STATUS_URL = "http://127.0.0.1:47834/status"
 #: How long the user must be away before training starts. Screen Time's own
@@ -139,10 +143,19 @@ def available_gb() -> float | None:
     return status.ullAvailPhys / 2**30
 
 
-def may_train(args: argparse.Namespace, now: datetime, running: bool = False) -> tuple[
-    bool, str, bool
-]:
-    """May training run now? Returns (allowed, why, shared).
+class Decision(NamedTuple):
+    """Whether to train right now, and why."""
+
+    allowed: bool
+    reason: str
+    shared: bool
+    #: True when the only thing standing in the way is free memory - which is
+    #: the one obstacle this script can do something about, by reclaiming some.
+    memory_blocked: bool = False
+
+
+def may_train(args: argparse.Namespace, now: datetime, running: bool = False) -> Decision:
+    """May training run now?
 
     `shared` means "the machine's owner is here, and we are only borrowing
     spare capacity" - the caller runs the trainer at low priority with fewer
@@ -153,37 +166,39 @@ def may_train(args: argparse.Namespace, now: datetime, running: bool = False) ->
     around one number is worse than either.
     """
     if args.ignore_presence:
-        return True, "presence checks disabled", False
+        return Decision(True, "presence checks disabled", False)
 
     here = presence(args.status_url)
     if here is None:
         window = inside(now.time(), args.start_t, args.end_t)
-        return window, (
+        return Decision(window, (
             f"presence API unreachable; falling back to the "
             f"{args.start}-{args.end} window"
-        ), False
+        ), False)
 
     if not here:
-        return True, "nobody at the computer", False
+        return Decision(True, "nobody at the computer", False)
 
     # Someone is here. Train only out of genuine spare capacity, and only if
     # there is enough left over that a heavy application - a game, say - can
     # still start without fighting us for memory.
     if not args.shared:
-        return False, "someone is at the computer", False
+        return Decision(False, "someone is at the computer", False)
 
     free = available_gb()
     if free is None:
-        return False, "someone is at the computer (cannot measure free memory)", False
+        return Decision(
+            False, "someone is at the computer (cannot measure free memory)", False
+        )
 
     floor = args.shared_floor_gb if running else args.shared_start_gb
     if free < floor:
-        return False, (
+        return Decision(False, (
             f"someone is at the computer and only {free:.1f} GB is free "
             f"(need {floor:.1f} GB to {'keep' if running else 'start'} sharing)"
-        ), False
+        ), False, memory_blocked=True)
 
-    return True, f"sharing: {free:.1f} GB free while you work", True
+    return Decision(True, f"sharing: {free:.1f} GB free while you work", True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -207,6 +222,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="stop sharing if free memory falls below this")
     parser.add_argument("--shared-threads", type=int, default=4,
                         help="threads to use while sharing the machine with you")
+    parser.add_argument("--free-memory-every", type=float, default=30.0,
+                        help="minutes between memory-reclaim attempts when blocked "
+                             "on free memory; 0 disables it")
     parser.add_argument("--settle", type=int, default=SETTLE_SECONDS)
     parser.add_argument("--threads", type=int, default=10)
     parser.add_argument("--data", default="data_v05")
@@ -241,15 +259,32 @@ def main(argv: list[str] | None = None) -> int:
     away_since: float | None = None
     last_reason = ""
 
+    last_reclaim = 0.0
+
     while True:
         now = datetime.now()
-        allowed, reason, shared = may_train(args, now)
+        decision = may_train(args, now)
 
-        if not allowed:
+        # Memory is the one obstacle that can be argued with. When it is the
+        # only thing in the way, reclaim some and re-decide immediately -
+        # measured at +2.6 GB on this machine, which is the difference between
+        # waiting and training. Rate-limited because it trims every process's
+        # working set, which is not free for whoever is using them.
+        if (
+            decision.memory_blocked
+            and args.free_memory_every > 0
+            and time.time() - last_reclaim > args.free_memory_every * 60
+        ):
+            last_reclaim = time.time()
+            print(f"[{now:%Y-%m-%d %H:%M}] low on memory; reclaiming", flush=True)
+            if free_memory(verbose=True) > 0:
+                decision = may_train(args, now)
+
+        if not decision.allowed:
             away_since = None
-            if reason != last_reason:
-                print(f"[{now:%Y-%m-%d %H:%M}] waiting: {reason}", flush=True)
-                last_reason = reason
+            if decision.reason != last_reason:
+                print(f"[{now:%Y-%m-%d %H:%M}] waiting: {decision.reason}", flush=True)
+                last_reason = decision.reason
             time.sleep(POLL_SECONDS)
             continue
 
@@ -263,9 +298,9 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(min(POLL_SECONDS, args.settle - waited))
             continue
 
-        print(f"[{now:%Y-%m-%d %H:%M}] training: {reason}", flush=True)
+        print(f"[{now:%Y-%m-%d %H:%M}] training: {decision.reason}", flush=True)
         last_reason = ""
-        code = run_training(args, stop_file, shared)
+        code = run_training(args, stop_file, decision.shared)
         away_since = None
         if code != 0:
             print(f"trainer exited {code}; stopping", flush=True)
@@ -350,12 +385,12 @@ def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int
     try:
         while process.poll() is None:
             time.sleep(poll)
-            allowed, reason, still_shared = may_train(args, datetime.now(), running=True)
+            decision = may_train(args, datetime.now(), running=True)
             # Also restart out of shared mode once the machine is free, so a
             # night does not run at four threads because it began while
             # someone was still awake.
-            if not allowed or still_shared != shared:
-                print(f"  yielding: {reason}", flush=True)
+            if not decision.allowed or decision.shared != shared:
+                print(f"  yielding: {decision.reason}", flush=True)
                 stop_file.touch()
                 break
         # Whether it is finishing on its own or on request, let it save.
