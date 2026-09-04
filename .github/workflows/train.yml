@@ -142,17 +142,40 @@ jobs:
               print(f"{name}.bin: {size / 2 / 1e6:.1f}M tokens")
           PY
 
+      # Picks the newest run that still HAS a checkpoint, rather than the
+      # newest *successful* one. Two reasons, both hit on the first day of the
+      # v0.5.0 run:
+      #
+      #  * Checkpoints upload with `if: always()`, so a run that failed after
+      #    training - the chain step's 403, say - holds real progress. Skipping
+      #    it throws away hours of work.
+      #  * Artifacts expire after retention-days. "Newest successful" happily
+      #    resolved to a week-old run whose artifact had already expired, so
+      #    the download failed; worse, had it not expired it would have been a
+      #    9.9M checkpoint from before the architecture changed.
+      #
+      # So: walk recent runs newest-first and take the first whose checkpoints
+      # artifact is present and unexpired. The trainer's own architecture guard
+      # is the backstop if one slips through anyway.
       - name: Fetch the newest checkpoint to resume from
         if: inputs.resume
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          run_id=$(gh run list --workflow train.yml --status success \
-            --json databaseId --jq '.[0].databaseId // empty')
+          run_id=""
+          for candidate in $(gh run list --workflow train.yml --limit 20 \
+              --json databaseId,createdAt --jq 'sort_by(.createdAt) | reverse | .[].databaseId'); do
+            usable=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts" \
+              --jq '[.artifacts[] | select(.name == "checkpoints" and .expired == false)] | length')
+            if [ "$usable" -gt 0 ]; then
+              run_id="$candidate"
+              break
+            fi
+          done
           if [ -z "$run_id" ]; then
-            echo "::error::resume was requested but no successful previous run exists."
-            echo "Run this workflow once with resume=false to create the first checkpoint."
+            echo "::error::resume was requested but no recent run has an unexpired checkpoints artifact."
+            echo "Run this workflow once with resume=false to start a fresh checkpoint."
             exit 1
           fi
           echo "Resuming from run $run_id"
