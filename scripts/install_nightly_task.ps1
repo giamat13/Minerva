@@ -32,8 +32,10 @@ Write-Host "python  $python"
 Write-Host "window  $StartTime - $EndTime, $Threads threads"
 
 # -u so the log is written as training runs rather than buffered until exit.
+# Piped through Out-File rather than `*>>`, which writes UTF-16 and made the
+# log render as "[ 2 0 2 6 - . . ." in every ordinary text tool.
 $inner = "& '$python' -u scripts/train_nightly.py --from $StartTime --to $EndTime " +
-         "--threads $Threads *>> '$log'"
+         "--threads $Threads *>&1 | Out-File -FilePath '$log' -Encoding utf8 -Append"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`"" `
     -WorkingDirectory $repo

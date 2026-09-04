@@ -111,8 +111,13 @@ def describe_task() -> list[str]:
     print(f"  task        {state}, next run {next_run.strip() or 'unknown'}")
     if state.strip() == "Disabled":
         problems.append("the nightly scheduled task is disabled")
-    # 267009 is "currently running", 267011 "has not yet run" - both fine.
-    if last_result.strip() not in ("", "0", "267009", "267011"):
+    # Benign results: 267009 "currently running", 267011 "has not yet run", and
+    # 2147946720 (0x800710E0) "the operator or administrator has refused the
+    # request" - which is MultipleInstances=IgnoreNew declining to start a
+    # second trainer while one is already going. The 30-minute self-heal
+    # trigger produces that every half hour by design, so treating it as a
+    # failure would report a broken run every single day.
+    if last_result.strip() not in ("", "0", "267009", "267011", "2147946720"):
         problems.append(
             f"the last nightly run exited with code {last_result.strip()} - "
             f"check data/train_nightly.log"

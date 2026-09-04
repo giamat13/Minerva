@@ -48,6 +48,16 @@ on:
         required: false
         default: true
 
+# The chain step re-dispatches this workflow, which needs actions:write - the
+# default GITHUB_TOKEN is read-only for Actions and the dispatch fails with
+# "403 Resource not accessible by integration", which is exactly how the first
+# v0.5.0 chain died after one job. workflow_dispatch is explicitly exempt from
+# the rule that GITHUB_TOKEN-triggered events do not start new runs, so this
+# is sufficient; a PAT is not needed.
+permissions:
+  contents: read
+  actions: write
+
 # Two runs writing checkpoints for the same model would race and produce a
 # corpus/checkpoint mismatch, so only one may be in flight at a time. Never
 # cancel a run in progress - that would throw away real training work.
