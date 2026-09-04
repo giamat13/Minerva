@@ -23,6 +23,12 @@ classifiers = [
 # (JSON Schema generation, config parsing, CLI) is built on the stdlib.
 dependencies = [
     "httpx>=0.27",
+    # Windows ships no IANA time zone database, so zoneinfo has nothing to read
+    # and the `current_time` tool raises ZoneInfoNotFoundError for every named
+    # zone - a shipped tool that simply does not work there. Linux and macOS
+    # have the system database, so this is Windows-only rather than a second
+    # dependency for everyone.
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
