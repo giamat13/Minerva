@@ -26,11 +26,25 @@ would forfeit every step since the last save.
 **The asymmetry is deliberate.** It yields immediately when someone appears,
 but waits for a settle period before starting, so stepping away for a coffee
 does not start and stop a run every two minutes.
+
+**Sharing.** Being at the computer does not always mean the computer is busy.
+When someone is here *and* there is real spare memory, training continues at
+below-normal priority on fewer threads - Windows then gives it only cycles
+nothing else wants, so foreground work never queues behind it. Two thresholds
+rather than one: 6 GB free to start sharing, 3 GB to keep sharing, so a run
+does not flicker on and off as memory moves around a single number. If
+something large starts - a game, say - free memory falls through the floor and
+training stops within seconds, having checkpointed.
+
+Memory is measured as *available* rather than *free*: Windows keeps most of
+RAM full of file cache and hands it to a new process on demand, so "free"
+understates what a game would actually get by many gigabytes.
 """
 
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import subprocess
 import sys
@@ -50,6 +64,9 @@ SETTLE_SECONDS = 180
 #: boundary after this, so it is also roughly the worst-case delay before the
 #: machine is handed back.
 POLL_SECONDS = 20
+#: Faster while sharing the machine: a game can claim several GB in seconds,
+#: so the memory floor is only worth having if it is noticed quickly.
+POLL_SECONDS_SHARED = 8
 
 
 def parse_clock(value: str) -> clock_time:
@@ -89,21 +106,84 @@ def presence(url: str, timeout: float = 4.0) -> bool | None:
     return bool(value) if isinstance(value, bool) else None
 
 
-def may_train(args: argparse.Namespace, now: datetime) -> tuple[bool, str]:
-    """Decide whether training may run right now, and say why."""
+class MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+def available_gb() -> float | None:
+    """Physical memory a new process could take right now, in GB.
+
+    GlobalMemoryStatusEx's ullAvailPhys, not "free" memory: Windows reports
+    most of RAM as in-use because it holds file cache there, and that cache is
+    handed to a new process instantly. Available is therefore what a game
+    launching would actually get, and free would understate it badly - on this
+    machine, 1.8 GB free against 15.5 GB total, with the honest answer being a
+    different number entirely. Costs microseconds, so it is safe to poll.
+    """
+    if not sys.platform.startswith("win"):
+        return None
+    status = MEMORYSTATUSEX()
+    status.dwLength = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    return status.ullAvailPhys / 2**30
+
+
+def may_train(args: argparse.Namespace, now: datetime, running: bool = False) -> tuple[
+    bool, str, bool
+]:
+    """May training run now? Returns (allowed, why, shared).
+
+    `shared` means "the machine's owner is here, and we are only borrowing
+    spare capacity" - the caller runs the trainer at low priority with fewer
+    threads in that mode.
+
+    `running` selects the memory threshold. Starting demands more headroom
+    than continuing, because a run that starts and stops as memory wobbles
+    around one number is worse than either.
+    """
     if args.ignore_presence:
-        return True, "presence checks disabled"
+        return True, "presence checks disabled", False
+
     here = presence(args.status_url)
     if here is None:
         window = inside(now.time(), args.start_t, args.end_t)
-        reason = (
+        return window, (
             f"presence API unreachable; falling back to the "
             f"{args.start}-{args.end} window"
-        )
-        return window, reason
-    if here:
-        return False, "someone is at the computer"
-    return True, "nobody at the computer"
+        ), False
+
+    if not here:
+        return True, "nobody at the computer", False
+
+    # Someone is here. Train only out of genuine spare capacity, and only if
+    # there is enough left over that a heavy application - a game, say - can
+    # still start without fighting us for memory.
+    if not args.shared:
+        return False, "someone is at the computer", False
+
+    free = available_gb()
+    if free is None:
+        return False, "someone is at the computer (cannot measure free memory)", False
+
+    floor = args.shared_floor_gb if running else args.shared_start_gb
+    if free < floor:
+        return False, (
+            f"someone is at the computer and only {free:.1f} GB is free "
+            f"(need {floor:.1f} GB to {'keep' if running else 'start'} sharing)"
+        ), False
+
+    return True, f"sharing: {free:.1f} GB free while you work", True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,6 +195,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status-url", default=STATUS_URL)
     parser.add_argument("--ignore-presence", action="store_true",
                         help="train continuously, ignoring who is at the machine")
+    parser.add_argument("--no-shared", dest="shared", action="store_false",
+                        help="never train while someone is at the computer")
+    # Defaults sized from measurement: the trainer's resident set is ~1.2 GB,
+    # and the machine has 15.5 GB. Requiring 6 GB free before sharing leaves
+    # roughly 4.8 GB for whatever starts next, which covers a heavy game; the
+    # 3 GB floor then stops us quickly if something actually claims it.
+    parser.add_argument("--shared-start-gb", type=float, default=6.0,
+                        help="free memory needed before training alongside you")
+    parser.add_argument("--shared-floor-gb", type=float, default=3.0,
+                        help="stop sharing if free memory falls below this")
+    parser.add_argument("--shared-threads", type=int, default=4,
+                        help="threads to use while sharing the machine with you")
     parser.add_argument("--settle", type=int, default=SETTLE_SECONDS)
     parser.add_argument("--threads", type=int, default=10)
     parser.add_argument("--data", default="data_v05")
@@ -128,6 +220,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     args.start_t, args.end_t = parse_clock(args.start), parse_clock(args.end)
 
+    # The hysteresis only works one way round. With a start threshold at or
+    # below the floor, a run stopped for low memory qualifies to start again
+    # immediately, and training flaps on and off for as long as memory sits
+    # between the two.
+    if args.shared and args.shared_start_gb <= args.shared_floor_gb:
+        parser.error(
+            f"--shared-start-gb ({args.shared_start_gb}) must be above "
+            f"--shared-floor-gb ({args.shared_floor_gb}); otherwise a run that "
+            f"stops for low memory immediately qualifies to start again"
+        )
+
     out = Path(args.out)
     stop_file = out / "STOP"
     out.mkdir(parents=True, exist_ok=True)
@@ -139,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
 
     while True:
         now = datetime.now()
-        allowed, reason = may_train(args, now)
+        allowed, reason, shared = may_train(args, now)
 
         if not allowed:
             away_since = None
@@ -149,7 +252,9 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(POLL_SECONDS)
             continue
 
-        # Settle: be away for a while before committing to a run.
+        # Settle before committing to a run. Sharing settles too, so a
+        # momentary dip in memory use does not start a run that the next
+        # sample stops again.
         if away_since is None:
             away_since = time.time()
         waited = time.time() - away_since
@@ -159,21 +264,29 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"[{now:%Y-%m-%d %H:%M}] training: {reason}", flush=True)
         last_reason = ""
-        code = run_training(args, stop_file)
+        code = run_training(args, stop_file, shared)
         away_since = None
         if code != 0:
             print(f"trainer exited {code}; stopping", flush=True)
             return code
 
 
-def run_training(args: argparse.Namespace, stop_file: Path) -> int:
-    """Train until the user comes back, then ask the trainer to stop cleanly."""
+def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int:
+    """Train until the machine is wanted back, then stop the trainer cleanly.
+
+    In shared mode the trainer runs below normal priority and on fewer
+    threads. Priority is what actually keeps the machine responsive: Windows
+    hands a below-normal process only the cycles nothing else wants, so
+    foreground work never queues behind training. The reduced thread count is
+    for cache and memory pressure, which priority does not help with.
+    """
+    threads = args.shared_threads if shared else args.threads
     command = [
         sys.executable, "-m", "minerva.training.trainer",
         "--data", args.data,
         "--out", args.out,
         "--steps", str(args.steps),
-        "--threads", str(args.threads),
+        "--threads", str(threads),
         "--checkpoint-interval", str(args.checkpoint_interval),
         "--stop-file", str(stop_file),
     ]
@@ -185,14 +298,26 @@ def run_training(args: argparse.Namespace, stop_file: Path) -> int:
         command += ["--resume", str(last)]
     command += args.extra
 
+    flags = 0
+    if shared and hasattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS"):
+        flags = subprocess.BELOW_NORMAL_PRIORITY_CLASS
+        print(f"  shared mode: {threads} threads, below-normal priority", flush=True)
+
+    # Polled faster while sharing: a game can claim several GB in seconds, and
+    # the memory floor is only useful if it is noticed quickly.
+    poll = POLL_SECONDS_SHARED if shared else POLL_SECONDS
+
     stop_file.unlink(missing_ok=True)
-    process = subprocess.Popen(command)
+    process = subprocess.Popen(command, creationflags=flags)
     try:
         while process.poll() is None:
-            time.sleep(POLL_SECONDS)
-            allowed, reason = may_train(args, datetime.now())
-            if not allowed:
-                print(f"  yielding the machine: {reason}", flush=True)
+            time.sleep(poll)
+            allowed, reason, still_shared = may_train(args, datetime.now(), running=True)
+            # Also restart out of shared mode once the machine is free, so a
+            # night does not run at four threads because it began while
+            # someone was still awake.
+            if not allowed or still_shared != shared:
+                print(f"  yielding: {reason}", flush=True)
                 stop_file.touch()
                 break
         # Whether it is finishing on its own or on request, let it save.

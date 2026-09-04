@@ -70,7 +70,12 @@ def describe_local(out_dir: Path) -> list[str]:
     # is quiet, and flagging that would make the check useless.
     here = presence()
     if here is True:
-        print("  presence    someone is at the computer (training yields)")
+        free = available_gb()
+        if free is None:
+            print("  presence    someone is at the computer (training yields)")
+        else:
+            print(f"  presence    someone is at the computer, {free:.1f} GB free "
+                  f"(shares above 6.0 GB, stops below 3.0)")
     elif here is False:
         print("  presence    nobody at the computer (training may run)")
         if age > timedelta(hours=2):
@@ -82,6 +87,27 @@ def describe_local(out_dir: Path) -> list[str]:
         print("  presence    unknown (Screen Time API unreachable; "
               "falling back to the 00:00-07:15 window)")
     return problems
+
+
+def available_gb() -> float | None:
+    """Physical memory a new process could take, in GB - see train_when_away."""
+    import ctypes
+
+    if not sys.platform.startswith("win"):
+        return None
+
+    class _Mem(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [
+            (name, ctypes.c_ulonglong) for name in
+            ("ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile",
+             "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")
+        ]
+
+    status = _Mem()
+    status.dwLength = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    return status.ullAvailPhys / 2**30
 
 
 def presence(url: str = "http://127.0.0.1:47834/status") -> bool | None:
