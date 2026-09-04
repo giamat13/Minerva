@@ -65,17 +65,42 @@ def describe_local(out_dir: Path) -> list[str]:
 
     age = datetime.now() - datetime.fromtimestamp(log.stat().st_mtime)
     print(f"  last write  {fmt_age(age)} ago")
-    # Only meaningful during the training window; outside it, silence is normal.
-    if in_window(datetime.now()) and age > timedelta(hours=2):
-        problems.append(
-            f"inside the training window but the log has not moved in {fmt_age(age)}"
-        )
+    # Training is presence-driven, so a quiet log only means something is wrong
+    # when nobody is at the computer. Someone sitting here is the *reason* it
+    # is quiet, and flagging that would make the check useless.
+    here = presence()
+    if here is True:
+        print("  presence    someone is at the computer (training yields)")
+    elif here is False:
+        print("  presence    nobody at the computer (training may run)")
+        if age > timedelta(hours=2):
+            problems.append(
+                f"nobody is at the computer but the log has not moved in "
+                f"{fmt_age(age)}"
+            )
+    else:
+        print("  presence    unknown (Screen Time API unreachable; "
+              "falling back to the 00:00-07:15 window)")
     return problems
 
 
-def in_window(now: datetime, start: int = 0, end_hour: int = 7, end_min: int = 15) -> bool:
-    minutes = now.hour * 60 + now.minute
-    return start * 60 <= minutes < end_hour * 60 + end_min
+def presence(url: str = "http://127.0.0.1:47834/status") -> bool | None:
+    """Whether anyone is at the computer, per Screen Time's local API.
+
+    None when the API cannot be reached, which is not the same as "away" -
+    see scripts/train_when_away.py, which makes the same distinction.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=4) as response:
+            payload = _json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    value = payload.get("present")
+    return bool(value) if isinstance(value, bool) else None
 
 
 def fmt_age(delta: timedelta) -> str:
@@ -93,24 +118,24 @@ def describe_task() -> list[str]:
         return problems
     query = subprocess.run(
         ["powershell", "-NoProfile", "-Command",
-         "$t = Get-ScheduledTask -TaskName Minerva-Nightly-Training "
+         "$t = Get-ScheduledTask -TaskName Minerva-Background-Training "
          "-ErrorAction SilentlyContinue; "
          "if (-not $t) { 'missing' } else { "
-         "$i = Get-ScheduledTaskInfo -TaskName Minerva-Nightly-Training; "
+         "$i = Get-ScheduledTaskInfo -TaskName Minerva-Background-Training; "
          "\"$($t.State)|$($i.NextRunTime)|$($i.LastTaskResult)\" }"],
         capture_output=True, text=True, timeout=60,
     )
     line = query.stdout.strip()
     if not line or line == "missing":
-        problems.append("the nightly scheduled task is not registered "
-                        "(run scripts/install_nightly_task.ps1)")
+        problems.append("the background training task is not registered "
+                        "(run scripts/install_training_task.ps1)")
         print("  task        NOT REGISTERED")
         return problems
     state, _, rest = line.partition("|")
     next_run, _, last_result = rest.partition("|")
     print(f"  task        {state}, next run {next_run.strip() or 'unknown'}")
     if state.strip() == "Disabled":
-        problems.append("the nightly scheduled task is disabled")
+        problems.append("the background training task is disabled")
     # Benign results: 267009 "currently running", 267011 "has not yet run", and
     # 2147946720 (0x800710E0) "the operator or administrator has refused the
     # request" - which is MultipleInstances=IgnoreNew declining to start a
@@ -119,8 +144,8 @@ def describe_task() -> list[str]:
     # failure would report a broken run every single day.
     if last_result.strip() not in ("", "0", "267009", "267011", "2147946720"):
         problems.append(
-            f"the last nightly run exited with code {last_result.strip()} - "
-            f"check data/train_nightly.log"
+            f"the last training run exited with code {last_result.strip()} - "
+            f"check data/training.log"
         )
     return problems
 

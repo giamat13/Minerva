@@ -75,6 +75,12 @@ class TrainConfig:
     max_hours: float | None = None
     """Wall-clock budget. Training stops cleanly at the limit with a full
     checkpoint, rather than being killed halfway through a write."""
+    stop_file: str | None = None
+    """Path whose existence asks the loop to checkpoint and exit cleanly.
+
+    An external "please stop" that costs no work: killing the process would
+    forfeit every step since the last checkpoint, while this finishes the step
+    in hand, saves, and leaves through the same path as a completed budget."""
 
     def tokens_per_step(self) -> int:
         return self.seq_len * self.micro_batch_size * self.grad_accum_steps
@@ -394,6 +400,13 @@ class Trainer:
                 print(f"\n  wall-clock budget reached at step {self.state.step}")
                 break
 
+            # Checked after the checkpoint above, so the exit is always from a
+            # just-saved state. This is how the scheduler hands the machine
+            # back the moment its owner sits down, without losing the night.
+            if cfg.stop_file and Path(cfg.stop_file).exists():
+                print(f"\n  stop requested via {cfg.stop_file} at step {self.state.step}")
+                break
+
         val_loss = self.evaluate()
         if val_loss < self.state.best_val_loss:
             self.state.best_val_loss = val_loss
@@ -425,6 +438,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--grad-accum", type=int, default=TrainConfig.grad_accum_steps)
     parser.add_argument("--seq-len", type=int, default=TrainConfig.seq_len)
     parser.add_argument("--max-hours", type=float, default=None)
+    parser.add_argument(
+        "--stop-file",
+        default=None,
+        help="stop cleanly, saving first, as soon as this path exists",
+    )
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--seed", type=int, default=TrainConfig.seed)
     parser.add_argument(
@@ -455,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         max_steps=args.steps,
         learning_rate=args.lr,
         max_hours=args.max_hours,
+        stop_file=args.stop_file,
         seed=args.seed,
         checkpoint_interval=args.checkpoint_interval,
     )
