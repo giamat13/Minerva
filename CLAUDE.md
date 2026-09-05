@@ -432,9 +432,49 @@ Rules that keep the two from corrupting each other:
   `best.pt`'s step can lag actual progress.
 - ✅ **Stop the loser once one side finishes.** A run that can no longer win
   is just burning a machine or a free-tier minute; cancel it and say so.
-- ✅ The two runs are independent samples of the same config, not halves of
-  one job. Taking the further-along one is legitimate; splicing their
-  weights together is not.
+### Merging the two runs
+
+Averaging two checkpoints' weights — a "model soup" — is a real technique, not
+a trick, and a merged model can genuinely beat both inputs. It is allowed
+here. What it is not is free, or automatic, and it never simply adds the two
+step counts together.
+
+Merging is only defined inside **one loss basin**. Check all three before
+attempting it:
+
+1. **Identical architecture, tensor for tensor** — `vocab_size` above all,
+   since it sets the embedding shape. Different shapes cannot be averaged at
+   all.
+2. **The same initialisation.** Both runs must start from the same seed. Two
+   models trained from *different* random inits average to noise: a network's
+   hidden units can be permuted freely, so averaging lines up features that
+   have nothing to do with each other.
+3. **A measured eval of the merged checkpoint against both inputs.** Merging
+   is an experiment whose result is a number, never an assumption. If the soup
+   is worse, keep the better input and write down that it was worse.
+
+And know what merging cannot do. Two runs that share a seed *and* a data order
+are the same trajectory at different points, not independent explorations —
+averaging an earlier point into a later one drags the result backwards. A soup
+pays off when the runs actually diverged (different data order, different
+seed, different hyper-parameters), which is a thing to arrange deliberately if
+a soup is the goal.
+
+- ✅ **Taking the further-along checkpoint is always legitimate.** It is the
+  default, and it needs no justification beyond the step count.
+- ✅ **Merging is legitimate too, once the three checks above pass and the
+  merged model has been evaluated.** Report the measured numbers for the soup
+  and for both inputs, and keep whichever actually won.
+- ❌ **Never merge on the assumption that more runs means a better model.**
+  A soup of mismatched or same-trajectory checkpoints is not a stronger model,
+  it is a worse one with a more impressive story.
+
+> Learned the hard way in v0.5.0: CI trained a 23.2M model on a 8,192-token
+> vocabulary while local trained 26.8M on 16,384, because the workflow left
+> `--vocab-size` at its default. The two were never comparable, let alone
+> mergeable, and nothing said so until someone asked whether they could be
+> combined. **If both sides are meant to be mergeable, every corpus and
+> config flag has to match explicitly, not by default.**
 
 ---
 
@@ -515,16 +555,41 @@ Swift הוא מודל בסיס בן 23.2M פרמטרים: הוא ממשיך טק
 
 **אין תקרת פרמטרים שרירותית.** גודל המודל נגזר מהמשימה, לא מהרגל. שני אילוצים אמיתיים קובעים: דאטה (בערך 20 טוקנים לפרמטר — וזה כבר לא הצוואר, בקטלוג של גוטנברג יש 57,136 טקסטים באנגלית) ומחשוב, שנמדד על המכונה שבפועל ולא מנוחש. במכונה הזו: 14 ליבות, **אין GPU** (אינטל משולב, torch בגרסת CPU), כ-2,520 טוקנים לשנייה ב-23.2M. לכן על CPU בלבד טווח ה-20M הוא הגודל הגדול ביותר שמתאמן בימים ולא בשבועות. v0.5.0 עומד על 23.2M כי זה מה שהקורפוס מחזיק: 518M טוקנים תומכים ב-23M (צריך 464M) ולא ב-29M (צריך 582M). ועוד מדידה שקובעת איך מתזמנים ריצה: 10 threads נותן 94% מהמהירות של 14 — כלומר להשאיר ארבע ליבות פנויות למשתמש עולה כ-6% בלבד. **GPU הוא הפתרון האמיתי** אם המטרה היא מודל שבאמת משוחח. אסור להציג מגבלת גודל כהעדפה — מציגים את המדידה, את המחיר, ונותנים למשתמש להחליט.
 
-**מריצים אימון בשני המקומות, ולוקחים את המהיר.**
-כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions, ומי
-שמגיע ראשון הוא זה שנחשב. אין צד שהוא תמיד מהיר יותר: מקומית יש 4 ליבות
-(בערך 3,100 טוקנים לשנייה) מול 2 ליבות ב-runner (בערך 1,400–1,600), אבל
-ל-runner אין מגבלת זמן על המכונה של המשתמש ויש לו מגבלת 6 שעות לכל job, ולכן
-הוא ממשיך מ-checkpoint בין ריצות. **אסור** ששתי הריצות יכתבו לאותה תיקייה —
-האימון המקומי הוא הבעלים של `checkpoints/swift`, וארטיפקט מ-CI יורד לתיקייה
-אחרת ומקודם רק אחרי השוואת התקדמות אמיתית לפי מספר הצעד מ-`training_log.jsonl`
+**מריצים אימון בשני המקומות, ולוקחים את המתקדם.**
+כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions. מקומית
+יש 14 ליבות מול 2 ב-runner, כלומר המקומי מהיר בערך פי שלושה, אבל ל-runner אין
+מגבלת זמן על המכונה של המשתמש ויש לו מגבלת 6 שעות לכל job, ולכן הוא ממשיך
+מ-checkpoint בין ריצות. **אסור** ששתי הריצות יכתבו לאותה תיקייה — האימון
+המקומי הוא הבעלים של תיקיית ה-checkpoint שלו, וארטיפקט מ-CI יורד לתיקייה אחרת
+ומקודם רק אחרי השוואת התקדמות אמיתית לפי מספר הצעד מ-`training_log.jsonl`
 (לא לפי תאריך הקובץ ולא לפי `best.pt`). כשצד אחד מסיים — עוצרים את השני
 ומדווחים על כך.
+
+**מיזוג שתי הריצות — מותר, אבל רק כשהן באמת ניתנות למיזוג.**
+מיצוע משקולות של שני checkpoints ("model soup") הוא טכניקה אמיתית, ומודל
+ממוזג באמת יכול להיות טוב משני המקורות. זה מותר כאן. מה שזה **לא**: זה לא
+מחבר את מספרי הצעדים, וזה לא עובד תמיד. מיזוג מוגדר רק בתוך אותו אגן הפסד,
+ולכן בודקים שלושה דברים לפני:
+
+1. **ארכיטקטורה זהה לחלוטין** — במיוחד `vocab_size`, שקובע את צורת טבלת
+   ה-embedding. צורות שונות פשוט אי אפשר למצע.
+2. **אותה אתחול (seed).** שני מודלים שאומנו מאתחולים אקראיים שונים ממוצעים
+   לרעש: אפשר להחליף יחידות נסתרות ברשת בסדר כלשהו, ולכן המיצוע מיישר פיצ'רים
+   שאין ביניהם שום קשר.
+3. **הערכה מדודה של המודל הממוזג מול שני המקורות.** מיזוג הוא ניסוי שהתוצאה
+   שלו היא מספר, לא הנחה. אם הממוזג יצא גרוע — שומרים את הטוב מבין המקורות
+   וכותבים שהוא יצא גרוע.
+
+וצריך לדעת מה מיזוג לא עושה: שתי ריצות עם אותו seed ואותו סדר דאטה הן **אותו
+מסלול בשתי נקודות**, לא שתי חקירות עצמאיות — ומיצוע נקודה מוקדמת לתוך מאוחרת
+מושך את התוצאה אחורה. soup משתלם כשהריצות באמת התפצלו (סדר דאטה שונה, seed
+שונה, היפר-פרמטרים שונים), וזה משהו שמסדרים מראש בכוונה אם רוצים soup.
+
+> נלמד בדרך הקשה ב-v0.5.0: ה-CI אימן מודל 23.2M על אוצר מילים של 8,192 בעוד
+> שהמקומי אימן 26.8M על 16,384, כי ה-workflow השאיר את `--vocab-size` בברירת
+> המחדל. השניים מעולם לא היו ברי-השוואה, בוודאי לא ברי-מיזוג, ושום דבר לא אמר
+> את זה עד ששאלו אם אפשר לחבר אותם. **אם שני הצדדים אמורים להיות ברי-מיזוג —
+> כל דגל של קורפוס וקונפיג חייב להיות זהה במפורש, לא בברירת מחדל.**
 
 **קומיטים באמצע העבודה.**
 מותר וכדאי לעשות קומיט (בלי push) כדי לשמור התקדמות אמיתית ועובדת באמצע

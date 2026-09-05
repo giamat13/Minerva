@@ -118,7 +118,7 @@ jobs:
             data/val.bin
             data/manifest.json
             data/val.txt
-          key: corpus-v5-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
+          key: corpus-v6-vocab16384-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
 
       # The books are fetched by their own script rather than by the corpus
       # build: at this volume it is a long, resumable job, and a build that
@@ -128,9 +128,14 @@ jobs:
         if: steps.corpus.outputs.cache-hit != 'true'
         run: python scripts/fetch_gutenberg_books.py
 
+      # --vocab-size must match what the local run used. It defaults to 8192,
+      # and leaving it unset trained CI on a 23.2M model with a 8,192-token
+      # vocabulary while local trained a 26.8M model on 16,384 - two different
+      # architectures, so the two checkpoints could never be compared, let
+      # alone merged.
       - name: Build the corpus, tokenizer and token bins
         if: steps.corpus.outputs.cache-hit != 'true'
-        run: minerva prepare-data --data data
+        run: minerva prepare-data --data data --vocab-size 16384
 
       # An older cache predates val.txt being cached, and `minerva evaluate`
       # reads it - which is how a run that trained 5,650 steps perfectly well
