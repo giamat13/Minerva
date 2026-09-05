@@ -47,6 +47,16 @@ on:
         type: boolean
         required: false
         default: true
+      seed:
+        description: >-
+          Random seed. Deliberately NOT the local run's 1729: a different seed
+          gives a different initialisation and a different data order, which is
+          what makes these two runs independent enough to be worth averaging at
+          the end. The same seed on both sides would produce one trajectory
+          twice, and averaging an earlier point of a trajectory into a later
+          one only moves the result backwards.
+        required: false
+        default: "2027"
 
 # The chain step re-dispatches this workflow, which needs actions:write - the
 # default GITHUB_TOKEN is read-only for Actions and the dispatch fails with
@@ -230,6 +240,7 @@ jobs:
             --out checkpoints/swift \
             --steps "${{ inputs.steps }}" \
             --max-hours "${{ inputs.max_hours }}" \
+            --seed "${{ inputs.seed }}" \
             $resume_args
 
       - name: Evaluate the base model

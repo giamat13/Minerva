@@ -460,6 +460,28 @@ pays off when the runs actually diverged (different data order, different
 seed, different hyper-parameters), which is a thing to arrange deliberately if
 a soup is the goal.
 
+### When to merge, and when not to
+
+The rule, in the order it is applied:
+
+1. **Would merging get a finished model sooner?** It cannot. Averaging does
+   not add step counts, so a soup is never a shortcut to the token budget. On
+   speed grounds alone the answer is always no.
+2. **Would merging make the model meaningfully better?** This is the question
+   that decides it, and **model quality outranks training speed** — a slower
+   route to a better model is the right trade here. A soup of two *fully
+   trained*, genuinely independent runs usually is better than either, so
+   arrange for that case deliberately: give the second run a different seed, so
+   it gets a different initialisation and a different data order.
+3. **Measure it.** Evaluate the soup against both inputs and keep whichever
+   actually wins. A merge that is not measured is not a result.
+
+That is why the CI workflow takes a `seed` input defaulting to something other
+than the local run's 1729. Two runs of the same seed on the same corpus are
+one trajectory sampled twice, and averaging them is worse than useless; two
+seeds make the pair worth merging at the end and cost nothing extra, since CI
+was going to run anyway.
+
 - ✅ **Taking the further-along checkpoint is always legitimate.** It is the
   default, and it needs no justification beyond the step count.
 - ✅ **Merging is legitimate too, once the three checks above pass and the
@@ -584,6 +606,24 @@ Swift הוא מודל בסיס בן 23.2M פרמטרים: הוא ממשיך טק
 מסלול בשתי נקודות**, לא שתי חקירות עצמאיות — ומיצוע נקודה מוקדמת לתוך מאוחרת
 מושך את התוצאה אחורה. soup משתלם כשהריצות באמת התפצלו (סדר דאטה שונה, seed
 שונה, היפר-פרמטרים שונים), וזה משהו שמסדרים מראש בכוונה אם רוצים soup.
+
+**מתי ממזגים ומתי לא — לפי הסדר הזה:**
+
+1. **האם מיזוג יביא מודל מוגמר מוקדם יותר?** לא, אף פעם. מיצוע לא מחבר צעדים,
+   ולכן soup הוא לעולם לא קיצור דרך לתקציב הטוקנים. משיקולי מהירות בלבד —
+   התשובה תמיד לא.
+2. **האם מיזוג ישפר את המודל באופן משמעותי?** זו השאלה שמכריעה, ו**איכות
+   המודל גוברת על מהירות האימון** — דרך איטית יותר למודל טוב יותר היא
+   הבחירה הנכונה כאן. soup של שתי ריצות **מאומנות עד הסוף** ובאמת עצמאיות
+   בדרך כלל טוב משתיהן, ולכן מסדרים את המצב הזה בכוונה: נותנים לריצה השנייה
+   seed שונה, כך שתקבל אתחול שונה וסדר דאטה שונה.
+3. **מודדים.** מעריכים את הממוזג מול שני המקורות ושומרים את מי שבאמת ניצח.
+   מיזוג שלא נמדד הוא לא תוצאה.
+
+לכן ל-workflow של ה-CI יש קלט `seed` שברירת המחדל שלו שונה מ-1729 של המקומי.
+שתי ריצות עם אותו seed על אותו קורפוס הן מסלול אחד שנדגם פעמיים, ומיצוע שלהן
+גרוע מחסר תועלת; שני seeds הופכים את הזוג לשווה מיזוג בסוף, ולא עולים כלום —
+ה-CI היה רץ ממילא.
 
 > נלמד בדרך הקשה ב-v0.5.0: ה-CI אימן מודל 23.2M על אוצר מילים של 8,192 בעוד
 > שהמקומי אימן 26.8M על 16,384, כי ה-workflow השאיר את `--vocab-size` בברירת
