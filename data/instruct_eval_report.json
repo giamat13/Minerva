@@ -2,36 +2,36 @@
   "summary": {
     "model": "swift-instruct",
     "seed": 1729,
-    "decoding": "sampled (as served)",
+    "decoding": "greedy",
     "thinking": "do",
     "cases": 54,
-    "format_valid_pct": 96.3,
-    "routing_accuracy_pct": 87.0,
-    "tool_name_accuracy_pct": 72.4,
-    "argument_accuracy_pct": 31.0,
-    "final_answer_accuracy_pct": 38.1,
+    "format_valid_pct": 100.0,
+    "routing_accuracy_pct": 90.7,
+    "tool_name_accuracy_pct": 82.8,
+    "argument_accuracy_pct": 37.9,
+    "final_answer_accuracy_pct": 47.6,
     "honest_refusal_pct": 33.3,
-    "relevance_pct": 63.5,
-    "language_match_pct": 91.8,
-    "coherence_pct": 100.0,
+    "relevance_pct": 79.6,
+    "language_match_pct": 96.1,
+    "coherence_pct": 94.3,
     "counts": {
       "cases": 54,
-      "format_ok": 52,
-      "routing_ok": 47,
+      "format_ok": 54,
+      "routing_ok": 49,
       "tool_expected": 29,
-      "tool_called": 23,
-      "tool_name_ok": 21,
-      "arguments_ok": 9,
+      "tool_called": 26,
+      "tool_name_ok": 24,
+      "arguments_ok": 11,
       "value_expected": 21,
-      "answer_ok": 8,
+      "answer_ok": 10,
       "refusal_expected": 3,
       "refusal_ok": 1,
-      "language_scorable": 49,
-      "language_ok": 45,
-      "answered": 51,
-      "coherent": 51,
-      "relevance_scorable": 52,
-      "relevant": 33
+      "language_scorable": 51,
+      "language_ok": 49,
+      "answered": 53,
+      "coherent": 50,
+      "relevance_scorable": 54,
+      "relevant": 43
     }
   },
   "cases": [
@@ -56,7 +56,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "314 times 15 is 471.",
+      "answer": "314 and 159.",
       "error": null
     },
     {
@@ -68,7 +68,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "66 times 66 is 5016.",
+      "answer": "The total is 0.152.",
       "error": null
     },
     {
@@ -110,13 +110,13 @@
     {
       "prompt": "What is 11 squared?",
       "expected_tool": "calculate",
-      "called": null,
-      "routing_ok": false,
-      "arguments_ok": false,
-      "relevant": false,
-      "language_ok": null,
+      "called": "calculate",
+      "routing_ok": true,
+      "arguments_ok": true,
+      "relevant": true,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "",
+      "answer": "11 squared is 121.",
       "error": null
     },
     {
@@ -126,9 +126,9 @@
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
-      "language_ok": true,
+      "language_ok": null,
       "degenerate": false,
-      "answer": "The square root of 169 is 84.",
+      "answer": "169.",
       "error": null
     },
     {
@@ -136,11 +136,11 @@
       "expected_tool": "calculate",
       "called": "calculate",
       "routing_ok": true,
-      "arguments_ok": true,
+      "arguments_ok": false,
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "5 factorial is 120.",
+      "answer": "5 factorial is 312.",
       "error": null
     },
     {
@@ -152,7 +152,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "That is 2000.",
+      "answer": "That is 20000.",
       "error": null
     },
     {
@@ -162,9 +162,9 @@
       "routing_ok": true,
       "arguments_ok": true,
       "relevant": true,
-      "language_ok": null,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "33.",
+      "answer": "33 times 3 is 99.",
       "error": null
     },
     {
@@ -175,8 +175,8 @@
       "arguments_ok": false,
       "relevant": true,
       "language_ok": true,
-      "degenerate": false,
-      "answer": "1000 minus 15 is 15.",
+      "degenerate": true,
+      "answer": "calculate {\"expression\": \"1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 1000 - 10",
       "error": null
     },
     {
@@ -188,7 +188,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "134 times 12 is 12.",
+      "answer": "144 divided by 12 is 12.",
       "error": null
     },
     {
@@ -206,13 +206,13 @@
     {
       "prompt": "What time is it in Paris?",
       "expected_tool": "current_time",
-      "called": "web_search",
+      "called": "current_time",
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Men are not able to give them a name.",
+      "answer": "It is 21:09:03 in London.",
       "error": null
     },
     {
@@ -222,21 +222,21 @@
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
-      "language_ok": null,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "",
+      "answer": "Today is Saturday, 19:03.",
       "error": null
     },
     {
       "prompt": "How many days between 2026-02-01 and 2026-02-28?",
       "expected_tool": "days_between",
-      "called": "days_between",
-      "routing_ok": true,
+      "called": null,
+      "routing_ok": false,
       "arguments_ok": false,
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "There are 82 days between those dates.",
+      "answer": "days_between {\"end_date\": \"2026-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-02-",
       "error": null
     },
     {
@@ -248,7 +248,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "That is 31 days.",
+      "answer": "That is 31 days, because 2026 was a leap year.",
       "error": null
     },
     {
@@ -269,10 +269,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "I do not know. I am working.",
+      "answer": "Hello there.",
       "error": null
     },
     {
@@ -281,10 +281,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "I do not make plans or act on whims. Both have points - planning prevents mistakes, spontaneity finds good surprises. Most people benefit from mixing them.",
+      "answer": "I do not know your name. You have not told me.",
       "error": null
     },
     {
@@ -293,22 +293,22 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": true,
+      "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Any time.",
+      "answer": "I am great.",
       "error": null
     },
     {
       "prompt": "Say the word apple.",
       "expected_tool": null,
-      "called": "web_search",
-      "routing_ok": false,
+      "called": null,
+      "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "A square",
+      "answer": "apple tree.",
       "error": null
     },
     {
@@ -320,7 +320,7 @@
       "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Three.",
+      "answer": "Seven.",
       "error": null
     },
     {
@@ -332,7 +332,7 @@
       "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Monday, Tuesday, Wednesday, Thursday, Friday.",
+      "answer": "Name the same year.",
       "error": null
     },
     {
@@ -344,7 +344,7 @@
       "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "ay.opxious.",
+      "answer": "No. I am not good at teaching you a proper position.",
       "error": null
     },
     {
@@ -353,10 +353,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Three.",
+      "answer": "Thursday.",
       "error": null
     },
     {
@@ -377,34 +377,34 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Glad I could not help. What is a name?",
+      "answer": "I cannot do that reliably. I was not trained on a large number.",
       "error": null
     },
     {
       "prompt": "Translate 'good night' into Korean.",
       "expected_tool": null,
-      "called": null,
-      "routing_ok": true,
-      "arguments_ok": false,
-      "relevant": false,
-      "language_ok": true,
-      "degenerate": false,
-      "answer": "Could you please send me the name of the world?",
-      "error": null
-    },
-    {
-      "prompt": "Who is the president of Brazil?",
-      "expected_tool": "web_search",
-      "called": null,
+      "called": "web_search",
       "routing_ok": false,
       "arguments_ok": false,
       "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "web_search {\"query\": \"who is the tallest model in the Minerva family.",
+      "answer": "Put a live-based onions in the air.",
+      "error": null
+    },
+    {
+      "prompt": "Who is the president of Brazil?",
+      "expected_tool": "web_search",
+      "called": "web_search",
+      "routing_ok": true,
+      "arguments_ok": false,
+      "relevant": true,
+      "language_ok": true,
+      "degenerate": false,
+      "answer": "Both the Minerva-Marshal Calls arerent.",
       "error": null
     },
     {
@@ -415,32 +415,32 @@
       "arguments_ok": false,
       "relevant": false,
       "language_ok": true,
-      "degenerate": false,
-      "answer": "I do not know.",
+      "degenerate": true,
+      "answer": "web_search {\"query\": \"capital price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is the stock price ofApple is",
       "error": null
     },
     {
       "prompt": "What happened in the news yesterday?",
       "expected_tool": "web_search",
-      "called": null,
-      "routing_ok": false,
+      "called": "current_time",
+      "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
-      "language_ok": true,
+      "relevant": true,
+      "language_ok": null,
       "degenerate": false,
-      "answer": "I do not know, and I have no access to your רבהtle.",
+      "answer": "",
       "error": null
     },
     {
       "prompt": "How many people live in Tokyo?",
       "expected_tool": "web_search",
-      "called": "current_time",
+      "called": "web_search",
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "The most widelyING",
+      "answer": "A search shows overtakes Tokyo.",
       "error": null
     },
     {
@@ -448,11 +448,11 @@
       "expected_tool": "calculate",
       "called": "calculate",
       "routing_ok": true,
-      "arguments_ok": false,
+      "arguments_ok": true,
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "23 כפול 8 זה 184.",
+      "answer": "23 כפול 19 זה 437.",
       "error": null
     },
     {
@@ -462,9 +462,9 @@
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
-      "language_ok": false,
+      "language_ok": null,
       "degenerate": false,
-      "answer": "39 times 31 is 428.",
+      "answer": "314 ל-159.",
       "error": null
     },
     {
@@ -482,25 +482,25 @@
     {
       "prompt": "12 בריבוע.",
       "expected_tool": "calculate",
-      "called": null,
-      "routing_ok": false,
+      "called": "calculate",
+      "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "בועידת עובדות.",
+      "answer": "12 בריבוע זה 4.",
       "error": null
     },
     {
       "prompt": "מה השעה בלונדון?",
       "expected_tool": "current_time",
-      "called": "current_time",
+      "called": "web_search",
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
-      "language_ok": false,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "The most widely perished in the world is the most widely grownish and deepest temperate'.",
+      "answer": "אין בערך דעה.",
       "error": null
     },
     {
@@ -508,11 +508,11 @@
       "expected_tool": "days_between",
       "called": "days_between",
       "routing_ok": true,
-      "arguments_ok": false,
+      "arguments_ok": true,
       "relevant": true,
-      "language_ok": null,
-      "degenerate": false,
-      "answer": "יש 5027-02-01.",
+      "language_ok": true,
+      "degenerate": true,
+      "answer": "יש 2026-02-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01 בפי2-01",
       "error": null
     },
     {
@@ -533,22 +533,22 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "אני לא יודע את השם שלך. לא אמרת לי אותו.",
+      "answer": "הכל בסדר. מה קוראים לך?",
       "error": null
     },
     {
       "prompt": "מי המנכ״ל של החברה?",
       "expected_tool": null,
-      "called": null,
-      "routing_ok": true,
+      "called": "web_search",
+      "routing_ok": false,
       "arguments_ok": false,
-      "relevant": true,
+      "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "אני לא יודע את השם שלך. לא אמרת לי אותו.",
+      "answer": "לפי חיפוש, up to 2000.",
       "error": null
     },
     {
@@ -558,9 +558,9 @@
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": true,
-      "language_ok": false,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "Nicely ace of the Minerva family.",
+      "answer": "זה נבחר.co. קח את טארקטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטטט",
       "error": null
     },
     {
@@ -569,10 +569,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
-      "language_ok": null,
+      "relevant": true,
+      "language_ok": true,
       "degenerate": false,
-      "answer": "",
+      "answer": "how can I help?",
       "error": null
     },
     {
@@ -581,10 +581,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": true,
+      "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "Hi. What can I do for you?",
+      "answer": "Hiya. What can I do for you?",
       "error": null
     },
     {
@@ -593,10 +593,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": true,
+      "relevant": false,
       "language_ok": true,
       "degenerate": false,
-      "answer": "You are welcome.",
+      "answer": "Of course. What would you like to do?",
       "error": null
     },
     {
@@ -608,7 +608,7 @@
       "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "I do not know what you would like me to explain.",
+      "answer": "No. I am not a very small model, so I have no access to. But I can only reply to a question that you cannot give a hand.",
       "error": null
     },
     {
@@ -617,10 +617,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "I do not know, and I have no real preference. What you want me to do.",
+      "answer": "I am Swift, the smallest model in the Minerva family.",
       "error": null
     },
     {
@@ -641,10 +641,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": false,
       "degenerate": false,
-      "answer": "I do not know. I have nodding.",
+      "answer": "web_search {\"query\": \"מה נשמע?",
       "error": null
     },
     {
@@ -666,9 +666,9 @@
       "routing_ok": true,
       "arguments_ok": false,
       "relevant": false,
-      "language_ok": true,
+      "language_ok": false,
       "degenerate": false,
-      "answer": "כל הכבוד. מה נשמע?",
+      "answer": "rupt.",
       "error": null
     },
     {
@@ -677,10 +677,10 @@
       "called": null,
       "routing_ok": true,
       "arguments_ok": false,
-      "relevant": false,
+      "relevant": true,
       "language_ok": true,
       "degenerate": false,
-      "answer": "אני לא יודע את השם שלך. לא אמרת לי אותו.",
+      "answer": "אני בערך עשרה מיליון פרמטרים.",
       "error": null
     }
   ]
