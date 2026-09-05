@@ -60,8 +60,17 @@ def describe_local(out_dir: Path) -> list[str]:
         first, last = losses[0], losses[-1]
         print(f"  val loss    {last['val_loss']:.4f}"
               f"  (from {first['val_loss']:.4f} at step {first.get('step', 0):,})")
-        if len(losses) >= 3 and last["val_loss"] > losses[-3]["val_loss"]:
-            problems.append("validation loss has risen over the last few evals")
+        # Compared against the best ever, with a real margin, rather than
+        # against three evals ago. Eval-to-eval jitter is a few thousandths;
+        # the first version of this check fired on +0.0001 while the curve was
+        # still visibly descending, which is exactly the kind of false alarm
+        # that teaches someone to ignore the report.
+        best = min(row["val_loss"] for row in losses)
+        if last["val_loss"] > best + 0.05:
+            problems.append(
+                f"validation loss is {last['val_loss']:.4f}, well above the best "
+                f"{best:.4f} - the run may be diverging"
+            )
 
     age = datetime.now() - datetime.fromtimestamp(log.stat().st_mtime)
     print(f"  last write  {fmt_age(age)} ago")

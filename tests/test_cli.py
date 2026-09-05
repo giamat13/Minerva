@@ -119,3 +119,44 @@ class TestErrorHandling:
         err = capsys.readouterr().err
         assert "ModelNotFoundError" in err
         assert "swift" in err
+
+
+class TestTrainForwardsEveryTrainerFlag:
+    """`minerva train` must not silently offer less than the module it wraps.
+
+    CI failed with "unrecognized arguments: --seed 2027" because the CLI
+    declared no --seed, even though the trainer had accepted one all along.
+    The gap stays invisible until something actually uses the missing flag, so
+    it is checked against the trainer's own source rather than a hand-written
+    list that would drift the same way.
+    """
+
+    def test_every_trainer_flag_is_offered_by_the_cli(self) -> None:
+        import argparse
+        import inspect
+        import re
+
+        from minerva.cli import build_parser
+        from minerva.training import trainer
+
+        # The trainer builds its parser inside main(), so read the flags it
+        # registers straight from that function's source.
+        declared = set(
+            re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', inspect.getsource(trainer.main))
+        )
+        assert "--seed" in declared, "sanity: the trainer really does take --seed"
+
+        cli = build_parser()
+        train = next(
+            action.choices["train"]
+            for action in cli._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        offered = {
+            option
+            for action in train._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+        missing = declared - offered
+        assert not missing, f"minerva train does not offer trainer flags: {sorted(missing)}"

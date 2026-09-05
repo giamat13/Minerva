@@ -344,6 +344,8 @@ def cmd_train(args: argparse.Namespace) -> int:
         ("--threads", args.threads),
         ("--resume", args.resume),
         ("--checkpoint-interval", args.checkpoint_interval),
+        ("--seed", args.seed),
+        ("--stop-file", args.stop_file),
     ):
         if value is not None:
             forwarded += [flag, str(value)]
@@ -610,6 +612,13 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--threads", type=int, default=None)
     train.add_argument("--resume", type=Path, default=None)
     train.add_argument("--checkpoint-interval", type=int, default=None)
+    # Every flag the trainer understands has to be repeated here and forwarded
+    # in cmd_train, or `minerva train` silently offers less than the module it
+    # wraps. --seed was missing, which is how CI failed with "unrecognized
+    # arguments: --seed 2027" the moment the two runs were given different
+    # seeds so their checkpoints would be worth merging.
+    train.add_argument("--seed", type=int, default=None)
+    train.add_argument("--stop-file", default=None)
     train.set_defaults(func=cmd_train)
 
     evaluate = sub.add_parser(
