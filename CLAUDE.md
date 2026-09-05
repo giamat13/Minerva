@@ -384,6 +384,34 @@ machine at 23.2M, batch 4 x seq 512:
   full pass is 31 sequential 6-hour jobs, which is not a plan. CI is a free
   parallel *sample* of the same config, not the primary run - see section 9.
 
+### Idle CPU is not spare capacity
+
+An obvious-looking idea, measured and mostly refuted, recorded so nobody
+spends a day on it again: *the machine looks idle, so push training harder.*
+
+While training actually runs, **CPU is already at 100%** across all 14 logical
+cores. There is no headroom to reclaim. What the extra cores buy is small,
+because 14 logical is 7 physical with hyperthreading:
+
+| threads | micro x accum | tok/s | vs 10 threads |
+|---|---|---|---|
+| 10 | 8 x 2 | 2,094 | 100% |
+| 14 | 8 x 2 | 2,230 | 106% |
+| 14 | 16 x 1 | 2,118 | 101% |
+| 14 | 4 x 4 | 2,241 | 107% |
+
+Two conclusions. **Bigger batches buy nothing** — reshaping the same 8,192
+tokens per step into one large matmul instead of two is within noise, so the
+memory sitting free cannot be turned into speed either; the trainer's resident
+set stays ~1.2 GB whatever the batch shape. And **the whole turbo idea is
+worth ~7%**, which is worth taking when nobody is at the machine and not worth
+any risk when someone is.
+
+If the machine looks idle to Task Manager, the likely explanation is not
+wasted capacity but that training is *not running at that moment* — waiting on
+presence or on the memory threshold. Check the scheduler's log before
+concluding anything about utilisation.
+
 ### The honest ceiling
 
 On **CPU only**, the mid-20M range is the largest size that trains in days
@@ -404,7 +432,31 @@ what it costs, and let the person decide.
 
 ---
 
-## 9. Running training: start both, keep whichever is faster
+## 9. Serving the web UI
+
+When asked to run, start, or restart the web UI, **open it in the browser
+too** — `minerva serve` only starts a server, and being handed a bare URL to
+paste is not what "run the web" means. On Windows that is
+`Start-Process "http://127.0.0.1:8420/"` after the server answers `/api/info`.
+
+- ✅ **Kill the old server first, and verify it died.** Stale `minerva serve`
+  processes keep the port and answer with old code, which looks exactly like a
+  change that did not take effect. `pkill` is unreliable here; match on the
+  command line with `Get-CimInstance Win32_Process` and `Stop-Process -Force`.
+- ✅ **Report what is actually loaded, not what the spec says.** `/api/info`
+  now asks the engine for the running model's real parameter count, because
+  serving a newer checkpoint under an existing name made the panel announce
+  "9.9M" for a 26.8M model. A spec string describes the checkpoint that
+  shipped, not the one running.
+- ✅ **Say plainly when a base model is being served.** A base checkpoint
+  continues text; it does not answer questions, and typing a question at one
+  produces plausible prose that ignores the question. That is the model
+  working as trained, not a bug — but it will look like a bug to anyone who
+  was not told, so say it before they ask.
+
+---
+
+## 10. Running training: start both, keep whichever is faster
 
 A real training run goes to **both** places at once — this machine and the
 GitHub Actions workflow (`.github/workflows/train.yml`) — and whichever gets

@@ -225,6 +225,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--free-memory-every", type=float, default=30.0,
                         help="minutes between memory-reclaim attempts when blocked "
                              "on free memory; 0 disables it")
+    # Turbo is only worth ~7%, so it is not worth risking on a short absence -
+    # but after half an hour away, holding four cores back for a desktop nobody
+    # is sitting at buys nothing. 0 disables it.
+    parser.add_argument("--turbo-after", type=float, default=30.0,
+                        help="minutes of continuous absence before using every core")
+    parser.add_argument("--turbo-threads", type=int, default=14,
+                        help="threads to use in turbo (default: every logical core)")
     parser.add_argument("--settle", type=int, default=SETTLE_SECONDS)
     parser.add_argument("--threads", type=int, default=10)
     parser.add_argument("--data", default="data_v05")
@@ -298,9 +305,19 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(min(POLL_SECONDS, args.settle - waited))
             continue
 
-        print(f"[{now:%Y-%m-%d %H:%M}] training: {decision.reason}", flush=True)
+        # Turbo: after a long uninterrupted absence, stop holding cores back.
+        # Worth only about 7% (measured: 2,094 tok/s on 10 threads against
+        # 2,230 on 14 - the 14 logical cores are 7 physical, so the extra
+        # hyperthreads add little), but it costs nothing when nobody is here.
+        turbo = (
+            not decision.shared
+            and args.turbo_after > 0
+            and waited >= args.turbo_after * 60
+        )
+        label = decision.reason + (" [turbo]" if turbo else "")
+        print(f"[{now:%Y-%m-%d %H:%M}] training: {label}", flush=True)
         last_reason = ""
-        code = run_training(args, stop_file, decision.shared)
+        code = run_training(args, stop_file, decision.shared, turbo)
         away_since = None
         if code != 0:
             print(f"trainer exited {code}; stopping", flush=True)
@@ -347,7 +364,9 @@ def pick_checkpoint(out: Path) -> Path | None:
     return None
 
 
-def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int:
+def run_training(
+    args: argparse.Namespace, stop_file: Path, shared: bool, turbo: bool = False
+) -> int:
     """Train until the machine is wanted back, then stop the trainer cleanly.
 
     In shared mode the trainer runs below normal priority and on fewer
@@ -356,7 +375,9 @@ def run_training(args: argparse.Namespace, stop_file: Path, shared: bool) -> int
     foreground work never queues behind training. The reduced thread count is
     for cache and memory pressure, which priority does not help with.
     """
-    threads = args.shared_threads if shared else args.threads
+    threads = args.shared_threads if shared else (
+        args.turbo_threads if turbo else args.threads
+    )
     command = [
         sys.executable, "-m", "minerva.training.trainer",
         "--data", args.data,

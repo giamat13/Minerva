@@ -63,6 +63,30 @@ _BASE_EVAL_PATH = Path("data/eval_report.json")
 _INSTRUCT_EVAL_PATH = Path("data/instruct_eval_report.json")
 
 
+def _live_parameter_count(model: Any) -> str:
+    """The size of the weights actually loaded, or "" if it cannot be known.
+
+    `ModelSpec.parameter_count` is a string written when the spec was authored,
+    so it describes the checkpoint that shipped rather than the one running.
+    Serving a newer checkpoint under an existing name made the panel announce
+    "9.9M" for a 26.8M model - precisely the confidently-wrong claim CLAUDE.md
+    exists to prevent. Asking the engine is the only honest answer.
+
+    Duck-typed on purpose: engines are pluggable, and one that runs weights
+    somewhere else (Ollama) cannot answer this. Those fall back to the spec.
+    """
+    try:
+        engine = getattr(model, "engine", None)
+        loader = getattr(engine, "load", None)
+        if loader is None:
+            return ""
+        loaded, _tokenizer = loader(model.spec.name)
+        total = loaded.num_parameters()
+    except Exception:
+        return ""
+    return f"{total / 1e6:.1f}M"
+
+
 def _stats_payload() -> dict[str, Any]:
     base = None
     if _BASE_EVAL_PATH.exists():
@@ -135,7 +159,7 @@ def _build_handler(model: Any, config: MinervaConfig) -> type[BaseHTTPRequestHan
                     {
                         "model": spec.name,
                         "display_name": spec.display_name,
-                        "parameter_count": spec.parameter_count,
+                        "parameter_count": _live_parameter_count(model) or spec.parameter_count,
                         "supports_thinking": spec.supports_thinking,
                         "supports_tools": spec.supports_tools,
                         "default_thinking": spec.default_thinking.latin_name,
