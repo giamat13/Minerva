@@ -100,6 +100,10 @@ jobs:
       # already encode - GitHub caps a repo's cache at 10 GB, and keeping the
       # text as well would blow through it for no benefit.
       #
+      # data/val.txt IS cached despite being text: `minerva evaluate` reads it
+      # to report bits-per-byte, and excluding it alongside train.txt crashed
+      # the evaluate step on every cache hit. It is 9.8 MB, not 1.9 GB.
+      #
       # The key is the code that determines the output, so editing SOURCES, a
       # cleaner or the tokenizer correctly invalidates it and forces an honest
       # rebuild.
@@ -113,6 +117,7 @@ jobs:
             data/train.bin
             data/val.bin
             data/manifest.json
+            data/val.txt
           key: corpus-v5-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
 
       # The books are fetched by their own script rather than by the corpus
@@ -126,6 +131,30 @@ jobs:
       - name: Build the corpus, tokenizer and token bins
         if: steps.corpus.outputs.cache-hit != 'true'
         run: minerva prepare-data --data data
+
+      # An older cache predates val.txt being cached, and `minerva evaluate`
+      # reads it - which is how a run that trained 5,650 steps perfectly well
+      # still ended in failure. Rebuilding it from val.bin is exact: the
+      # tokenizer is lossless (tests/test_training_tokenizer.py asserts the
+      # round trip, and it was checked against this very corpus), so this
+      # recovers the file rather than approximating it, and costs seconds
+      # instead of the two hours a cache-key bump would spend re-downloading
+      # 4,382 books.
+      - name: Restore val.txt if an older cache lacks it
+        run: |
+          set -euo pipefail
+          if [ ! -s data/val.txt ] && [ -s data/val.bin ]; then
+            echo "val.txt missing; decoding it back from val.bin"
+            python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          from minerva.training.tokenizer import BPETokenizer
+          tok = BPETokenizer.load(Path("data/tokenizer.json"))
+          ids = np.fromfile("data/val.bin", dtype=np.uint16).tolist()
+          Path("data/val.txt").write_text(tok.decode(ids), encoding="utf-8")
+          print(f"wrote data/val.txt ({len(ids):,} tokens)")
+          PY
+          fi
 
       # A cache hit must still leave a usable corpus behind. If it does not,
       # training would fail later and more confusingly than it does here.
