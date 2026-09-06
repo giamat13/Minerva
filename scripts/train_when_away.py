@@ -392,14 +392,22 @@ def run_training(
         command += ["--resume", str(resume)]
     command += args.extra
 
-    flags = 0
-    if shared and hasattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS"):
-        flags = subprocess.BELOW_NORMAL_PRIORITY_CLASS
-        print(f"  shared mode: {threads} threads, below-normal priority", flush=True)
+    # Below-normal *always*, not only while sharing. On an idle machine it
+    # costs nothing - priority decides who wins a contested core, and when
+    # nothing else wants the CPU training still gets all of it - but it means
+    # that the moment someone touches the keyboard their work preempts
+    # training instantly, instead of competing with 14 threads for the twenty
+    # seconds it takes the loop to notice them and ask it to stop.
+    flags = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+    mode = "shared" if shared else ("turbo" if turbo else "full")
+    print(f"  {mode} mode: {threads} threads, below-normal priority", flush=True)
 
-    # Polled faster while sharing: a game can claim several GB in seconds, and
-    # the memory floor is only useful if it is noticed quickly.
-    poll = POLL_SECONDS_SHARED if shared else POLL_SECONDS
+    # Always the short poll while a trainer is live. The long one only ever
+    # made sense for the idle loop; while training is actually running this
+    # interval is how long someone waits for the machine after they sit down,
+    # and eight seconds of a below-normal process is not worth saving four
+    # presence checks a minute.
+    poll = POLL_SECONDS_SHARED
 
     stop_file.unlink(missing_ok=True)
     process = subprocess.Popen(command, creationflags=flags)

@@ -128,7 +128,7 @@ jobs:
             data/val.bin
             data/manifest.json
             data/val.txt
-          key: corpus-v6-vocab16384-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
+          key: corpus-v7-vocab16384-${{ hashFiles('src/minerva/training/data.py', 'src/minerva/training/tokenizer.py', 'data/gutenberg_bulk_ids.json') }}
 
       # The books are fetched by their own script rather than by the corpus
       # build: at this volume it is a long, resumable job, and a build that
@@ -171,16 +171,50 @@ jobs:
           PY
           fi
 
-      # A cache hit must still leave a usable corpus behind. If it does not,
-      # training would fail later and more confusingly than it does here.
-      - name: Verify the corpus is present
+      # A cache hit must still leave a *correct* corpus behind, not merely a
+      # present one. Checking the vocabulary matters more than it sounds: a
+      # cache saved before the --vocab-size fix carried an 8,192 tokenizer, and
+      # because a cache hit skips the build step entirely, that poisoned cache
+      # kept being restored and CI trained a 23.2M model for three days while
+      # every config said 16,384. Rebuilding here is what makes the fix
+      # self-healing rather than dependent on remembering to bump a cache key.
+      - name: Verify the corpus, and rebuild it if the vocabulary is wrong
+        env:
+          WANT_VOCAB: "16384"
         run: |
           set -euo pipefail
+          rebuild=0
           for f in data/tokenizer.json data/train.bin data/val.bin; do
-            test -s "$f" || { echo "::error::$f is missing or empty after corpus setup"; exit 1; }
+            if [ ! -s "$f" ]; then
+              echo "::warning::$f is missing or empty; rebuilding the corpus"
+              rebuild=1
+            fi
+          done
+          if [ "$rebuild" -eq 0 ]; then
+            have=$(python -c "
+          import json
+          d = json.load(open('data/tokenizer.json', encoding='utf-8'))
+          print(len(d.get('vocab', d.get('tokens', {}))))
+          ")
+            if [ "$have" != "$WANT_VOCAB" ]; then
+              echo "::warning::cached tokenizer has vocab $have, want $WANT_VOCAB; rebuilding"
+              rebuild=1
+            fi
+          fi
+          if [ "$rebuild" -eq 1 ]; then
+            rm -f data/tokenizer.json data/train.bin data/val.bin data/train.txt data/val.txt
+            python scripts/fetch_gutenberg_books.py
+            minerva prepare-data --data data --vocab-size "$WANT_VOCAB"
+          fi
+          for f in data/tokenizer.json data/train.bin data/val.bin; do
+            test -s "$f" || { echo "::error::$f is still missing after rebuild"; exit 1; }
           done
           python - <<'PY'
+          import json
           from pathlib import Path
+          vocab = len(json.loads(Path("data/tokenizer.json").read_text(encoding="utf-8"))
+                      .get("vocab", {}))
+          print(f"tokenizer vocabulary: {vocab}")
           for name in ("train", "val"):
               size = Path(f"data/{name}.bin").stat().st_size
               print(f"{name}.bin: {size / 2 / 1e6:.1f}M tokens")
