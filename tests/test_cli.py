@@ -160,3 +160,63 @@ class TestTrainForwardsEveryTrainerFlag:
         }
         missing = declared - offered
         assert not missing, f"minerva train does not offer trainer flags: {sorted(missing)}"
+
+
+class TestPrepareDataRespectsVocabSize:
+    """An explicit --vocab-size must never be silently ignored.
+
+    data/tokenizer.json is committed, so every fresh checkout starts with a
+    tokenizer already on disk. prepare-data reused it whatever its size, which
+    made CI train a 8,192-vocabulary model for days while its workflow asked
+    for 16,384.
+    """
+
+    def test_a_mismatched_tokenizer_is_retrained(self, tmp_path, monkeypatch, capsys) -> None:
+        from minerva.training.tokenizer import BPETokenizer, train_bpe
+
+        data = tmp_path / "data"
+        data.mkdir()
+        # Varied enough that BPE can actually reach different vocabulary
+        # sizes; a repeated sentence saturates after a couple of hundred
+        # merges and both sizes come out identical, testing nothing.
+        import random
+
+        words = [
+            "".join(random.Random(i).choices("abcdefghijklmnopqrstuvwxyz", k=6))
+            for i in range(400)
+        ]
+        rng = random.Random(0)
+        text = " ".join(rng.choice(words) for _ in range(20_000))
+        (data / "train.txt").write_text(text, encoding="utf-8")
+        (data / "val.txt").write_text(text[:2000], encoding="utf-8")
+
+        # A repetitive corpus runs out of merges before the requested size, so
+        # the starting size is read back rather than assumed.
+        vocab, merges = train_bpe(text, 300, verbose=False)
+        BPETokenizer(vocab, merges).save(data / "tokenizer.json")
+        before = BPETokenizer.load(data / "tokenizer.json").vocab_size
+
+        # Only the tokenizer stage matters here; skip corpus build and packing.
+        import minerva.cli as cli
+
+        monkeypatch.setattr(
+            cli, "_TOKENIZER_SAMPLE_BYTES", 10_000_000, raising=False
+        )
+        monkeypatch.setattr(
+            "minerva.training.data.build_corpus",
+            lambda out_dir: {"characters": {"train": len(text), "val": 2000}},
+        )
+        monkeypatch.setattr(
+            "minerva.training.dataset.encode_corpus",
+            lambda src, tok, out, **kw: out.write_bytes(b"\0\0") or 1,
+        )
+
+        wanted = before + 50
+        args = __import__("argparse").Namespace(
+            data=data, vocab_size=wanted, force=False, no_color=True
+        )
+        cli.cmd_prepare_data(args)
+
+        after = BPETokenizer.load(data / "tokenizer.json").vocab_size
+        assert after != before, "the mismatched tokenizer was silently reused"
+        assert "retraining it" in capsys.readouterr().out

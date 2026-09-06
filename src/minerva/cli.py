@@ -287,9 +287,29 @@ def cmd_prepare_data(args: argparse.Namespace) -> int:
     print(f"     train {chars['train'] / 1e6:.2f} MB   val {chars['val'] / 1e6:.2f} MB")
 
     tokenizer_path = data_dir / "tokenizer.json"
+    # Reusing an existing tokenizer is right - training one takes ~20 minutes
+    # and the result is deterministic - but only when it is the tokenizer that
+    # was asked for. Silently keeping one of a different size ignored an
+    # explicit --vocab-size, and because data/tokenizer.json is committed (it
+    # pins how text maps to ids for the shipped checkpoint) every fresh CI
+    # checkout started with the old 8,192 one. CI then trained a 23.2M model
+    # for days while the workflow said 16384 and local trained 26.8M - two
+    # architectures that could never be compared, let alone merged.
+    existing = None
     if tokenizer_path.exists() and not args.force:
+        existing = BPETokenizer.load(tokenizer_path)
+        if existing.vocab_size != args.vocab_size:
+            print(
+                style.dim(
+                    f"\n2/3  {tokenizer_path} has vocab {existing.vocab_size}, "
+                    f"but {args.vocab_size} was asked for - retraining it"
+                )
+            )
+            existing = None
+
+    if existing is not None:
         print(style.dim(f"\n2/3  tokenizer exists at {tokenizer_path} (use --force to retrain)"))
-        tokenizer = BPETokenizer.load(tokenizer_path)
+        tokenizer = existing
     else:
         print(style.bold(f"\n2/3  training a byte-level BPE tokenizer (vocab {args.vocab_size})"))
         # Trained on a bounded sample, not the whole corpus. BPE merge
