@@ -261,6 +261,32 @@ jobs:
           test -f checkpoints/swift/last.pt \
             || { echo "::error::artifact has no checkpoints/swift/last.pt"; exit 1; }
 
+          # An architecture change makes every older checkpoint unresumable.
+          # The trainer's own guard catches that and refuses, which is correct
+          # in isolation but kills the chain: every chained run has resume=true,
+          # so each one downloads the same stale checkpoint and dies again.
+          # Discarding it here turns a permanent stall into one fresh start.
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+
+          import torch
+
+          from minerva.training.tokenizer import BPETokenizer
+
+          want = BPETokenizer.load(Path("data/tokenizer.json")).vocab_size
+          payload = torch.load("checkpoints/swift/last.pt", map_location="cpu",
+                               weights_only=False)
+          have = payload.get("model_config", {}).get("vocab_size")
+          if have != want:
+              print(f"::warning::downloaded checkpoint has vocab {have}, corpus has "
+                    f"{want}; discarding it and starting fresh")
+              shutil.rmtree("checkpoints/swift")
+          else:
+              print(f"checkpoint matches the corpus (vocab {have}), resuming at step "
+                    f"{payload['state']['step']:,}")
+          PY
+
       - name: Pretrain
         run: |
           set -euo pipefail
