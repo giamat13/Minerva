@@ -456,12 +456,28 @@ paste is not what "run the web" means. On Windows that is
 
 ---
 
-## 10. Running training: start both, keep whichever is faster
+## 10. Running training: local is the run; CI is optional
 
-A real training run goes to **both** places at once — this machine and the
-GitHub Actions workflow (`.github/workflows/train.yml`) — and whichever gets
-there first is the one that counts. Neither is reliably faster, so the
-answer is measured per run rather than assumed:
+**v0.5.0 update: the CI half of this was switched off part-way through, and
+that was the right call.** What follows is still the procedure when two runs
+*are* wanted, but starting both is no longer automatic — it is a decision with
+a cost, and the cost turned out to be higher than the table below suggests.
+
+What actually happened over four days: CI restarted from zero three separate
+times, each time because a configuration difference from local was discovered
+only after days of training — `--vocab-size` left at its default, a poisoned
+corpus cache that a cache hit kept restoring, an old checkpoint the new
+architecture could not resume. Every one was a real bug worth fixing, and none
+of them advanced the model. Meanwhile local passed 70%.
+
+The lesson is not "CI is useless" — it is that **a second run has to be kept
+genuinely identical to the first, and that costs attention that comes out of
+the same budget as the training itself.** Start one only when there is a
+reason (a soup at the end, insurance against losing the machine), and when
+starting it, check every corpus and config flag explicitly rather than
+trusting defaults.
+
+The measurements, for whenever that decision is taken again:
 
 | | local | hosted runner |
 |---|---|---|
@@ -470,9 +486,9 @@ answer is measured per run rather than assumed:
 | job limit | none | 6 h hard, so the run must resume across jobs |
 | costs the user's machine | yes | no |
 
-Local is roughly three times as fast per token, and the runner is usually
-better at grinding through a long budget unattended. Start both, watch the
-step counters, and take the checkpoint that is further along.
+Local is roughly three times as fast per token, and the runner is better at
+grinding through a long budget unattended. When both are running, watch the
+step counters and take the checkpoint that is further along.
 
 Rules that keep the two from corrupting each other:
 
@@ -629,8 +645,20 @@ Swift הוא מודל בסיס בן 23.2M פרמטרים: הוא ממשיך טק
 
 **אין תקרת פרמטרים שרירותית.** גודל המודל נגזר מהמשימה, לא מהרגל. שני אילוצים אמיתיים קובעים: דאטה (בערך 20 טוקנים לפרמטר — וזה כבר לא הצוואר, בקטלוג של גוטנברג יש 57,136 טקסטים באנגלית) ומחשוב, שנמדד על המכונה שבפועל ולא מנוחש. במכונה הזו: 14 ליבות, **אין GPU** (אינטל משולב, torch בגרסת CPU), כ-2,520 טוקנים לשנייה ב-23.2M. לכן על CPU בלבד טווח ה-20M הוא הגודל הגדול ביותר שמתאמן בימים ולא בשבועות. v0.5.0 עומד על 23.2M כי זה מה שהקורפוס מחזיק: 518M טוקנים תומכים ב-23M (צריך 464M) ולא ב-29M (צריך 582M). ועוד מדידה שקובעת איך מתזמנים ריצה: 10 threads נותן 94% מהמהירות של 14 — כלומר להשאיר ארבע ליבות פנויות למשתמש עולה כ-6% בלבד. **GPU הוא הפתרון האמיתי** אם המטרה היא מודל שבאמת משוחח. אסור להציג מגבלת גודל כהעדפה — מציגים את המדידה, את המחיר, ונותנים למשתמש להחליט.
 
-**מריצים אימון בשני המקומות, ולוקחים את המתקדם.**
-כל ריצת אימון אמיתית יוצאת לדרך גם במחשב המקומי וגם ב-GitHub Actions. מקומית
+**המקומי הוא הריצה; CI הוא אופציונלי.**
+עדכון v0.5.0: חצי ה-CI כובה באמצע הריצה, וזו הייתה ההחלטה הנכונה. במשך ארבעה
+ימים ה-CI התחיל מאפס שלוש פעמים, בכל פעם בגלל הבדל קונפיגורציה מהמקומי
+שהתגלה רק אחרי ימי אימון — `--vocab-size` שנשאר בברירת מחדל, cache מורעל
+ש-cache hit המשיך לשחזר, ו-checkpoint ישן שהארכיטקטורה החדשה לא יכלה להמשיך
+ממנו. כל אחד היה באג אמיתי ששווה לתקן, ואף אחד מהם לא קידם את המודל. בינתיים
+המקומי עבר 70%.
+
+הלקח הוא לא ש-CI חסר תועלת — אלא ש**ריצה שנייה חייבת להישמר זהה לחלוטין
+לראשונה, וזה עולה תשומת לב שיוצאת מאותו תקציב כמו האימון עצמו.** מפעילים
+אותה רק כשיש סיבה (soup בסוף, ביטוח מפני אובדן המכונה), וכשמפעילים — בודקים
+כל דגל של קורפוס וקונפיג במפורש ולא סומכים על ברירות מחדל.
+
+כשכן מריצים את שניהם: מקומית
 יש 14 ליבות מול 2 ב-runner, כלומר המקומי מהיר בערך פי שלושה, אבל ל-runner אין
 מגבלת זמן על המכונה של המשתמש ויש לו מגבלת 6 שעות לכל job, ולכן הוא ממשיך
 מ-checkpoint בין ריצות. **אסור** ששתי הריצות יכתבו לאותה תיקייה — האימון

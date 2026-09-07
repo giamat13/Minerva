@@ -210,9 +210,18 @@ def gh_env() -> dict[str, str]:
     return env
 
 
+#: CI training was switched off part-way through v0.5.0 - see CLAUDE.md
+#: section 10 for why. Set to True to watch the chain again; while it is
+#: False the CI half is reported for information and never raises a problem,
+#: because a run nobody intends to keep alive is not a fault.
+WATCH_CI = False
+
+
 def describe_ci() -> list[str]:
     problems: list[str] = []
-    print("\nCI")
+    print("\nCI" + ("" if WATCH_CI else "  (not in use - local is the run)"))
+    if not WATCH_CI:
+        return problems
     gh = shutil.which("gh") or r"C:\Program Files\GitHub CLI\gh.exe"
     if not Path(gh).exists():
         print("  gh CLI not found; skipping")
