@@ -323,6 +323,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"trainer exited {code}; stopping", flush=True)
             return code
 
+        # Stop once the budget is met. The trainer's loop is `while step <
+        # max_steps`, so at the target it exits immediately having done
+        # nothing - and without this the scheduler would cheerfully respawn it
+        # every few minutes forever, rewriting checkpoints and burning the
+        # machine to train zero steps.
+        reached = reached_step(Path(args.out))
+        if reached >= args.steps:
+            print(
+                f"[{datetime.now():%Y-%m-%d %H:%M}] reached step {reached:,} of "
+                f"{args.steps:,} - training is complete, exiting.",
+                flush=True,
+            )
+            return 0
+
 
 def readable_checkpoint(path: Path) -> bool:
     """Can this checkpoint actually be loaded?
@@ -342,6 +356,28 @@ def readable_checkpoint(path: Path) -> bool:
         print(f"  {path.name} will not load ({type(exc).__name__}); "
               f"trying an older checkpoint", flush=True)
         return False
+
+
+def reached_step(out: Path) -> int:
+    """Highest step in the training log, or 0.
+
+    Read from training_log.jsonl rather than from best.pt, whose step only
+    moves when validation improves and therefore lags real progress - the
+    same reason CLAUDE.md section 10 gives for comparing runs this way.
+    """
+    log = out / "training_log.jsonl"
+    if not log.exists():
+        return 0
+    best = 0
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            best = max(best, int(json.loads(line).get("step", 0)))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue  # a row torn by a kill mid-write is not a failure
+    return best
 
 
 def pick_checkpoint(out: Path) -> Path | None:
