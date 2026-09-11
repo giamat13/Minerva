@@ -365,10 +365,23 @@ def reached_step(out: Path) -> int:
     moves when validation improves and therefore lags real progress - the
     same reason CLAUDE.md section 10 gives for comparing runs this way.
     """
+    # The log is only written every log_interval steps, so on its own it can
+    # stop short of the budget: the v0.5.0 run finished at step 63,232 while
+    # its last log row said 63,230, and the scheduler looped for days waiting
+    # for a number the log would never show. last.pt records the exact step.
+    best = 0
+    last = out / "last.pt"
+    if last.exists():
+        try:
+            import torch
+
+            payload = torch.load(last, map_location="cpu", weights_only=False)
+            best = int(payload.get("state", {}).get("step", 0))
+        except Exception:
+            best = 0
     log = out / "training_log.jsonl"
     if not log.exists():
-        return 0
-    best = 0
+        return best
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
